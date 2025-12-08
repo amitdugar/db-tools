@@ -1,0 +1,14 @@
+.DS_Store
+._*
+vendor/
+composer.lock
+node_modules/
+/var/
+.phpunit.cache/
+.idea/
+*.log
+*.cache
+settings.local.json
+
+# Snyk Security Extension - AI Rules (auto-generated)
+.github/instructions/snyk_rules.instructions.md

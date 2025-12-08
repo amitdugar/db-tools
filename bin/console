@@ -1,0 +1,13 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use DbTools\Console\ConsoleFactory;
+use DbTools\Service\NullRuntime;
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+$runtime = new NullRuntime();
+$app = ConsoleFactory::create($runtime);
+$app->run();

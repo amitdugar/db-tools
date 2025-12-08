@@ -1,0 +1,35 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use DbTools\Config\ConfigLoader;
+use DbTools\Console\ConsoleFactory;
+use DbTools\Service\Runtime;
+
+// Find autoloader - works both when run directly and when installed as a dependency
+$autoloadPaths = [
+    __DIR__ . '/../vendor/autoload.php',         // When run directly from package
+    __DIR__ . '/../../../autoload.php',          // When installed as a dependency (vendor/amitdugar/db-tools/bin)
+];
+
+$autoloaderFound = false;
+foreach ($autoloadPaths as $autoloadPath) {
+    if (file_exists($autoloadPath)) {
+        require_once $autoloadPath;
+        $autoloaderFound = true;
+        break;
+    }
+}
+
+if (!$autoloaderFound) {
+    fwrite(STDERR, "Could not find Composer autoloader. Please run 'composer install'.\n");
+    exit(1);
+}
+
+$cwd = getcwd() ?: __DIR__ . '/..';
+$config = ConfigLoader::load($cwd);
+
+$runtime = new Runtime();
+$app = ConsoleFactory::create($runtime, $config);
+$app->run();
