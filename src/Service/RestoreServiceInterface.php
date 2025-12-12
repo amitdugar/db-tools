@@ -10,6 +10,7 @@ interface RestoreServiceInterface
      * Restore from the given archive path.
      *
      * @param array<string,mixed> $options
+     * @param callable|null $tickCallback Optional callback called every 100ms during import
      */
-    public function restore(array $options): void;
+    public function restore(array $options, ?callable $tickCallback = null): void;
 }

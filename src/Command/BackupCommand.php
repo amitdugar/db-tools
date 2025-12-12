@@ -17,6 +17,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 #[AsCommand(name: 'backup', description: 'Create a backup archive for the configured database')]
 final class BackupCommand extends Command
 {
+    use SpinnerTrait;
+
     public function __construct(private readonly RuntimeInterface $runtime, private readonly ?ProfilesConfig $config = null)
     {
         parent::__construct();
@@ -85,12 +87,17 @@ final class BackupCommand extends Command
             ];
 
             try {
-                $archivePath = $this->runtime->backupService()->backup($options);
-                $output->writeln(sprintf('<info>✓</info> Backup created: %s', basename($archivePath)));
+                $start = microtime(true);
+                $tickCallback = $this->createSpinnerCallback($output, 'Dumping', $start);
+                $archivePath = $this->runtime->backupService()->backup($options, $tickCallback);
+                $this->clearSpinner($output);
+                $elapsed = microtime(true) - $start;
+                $output->writeln(sprintf('<info>✓</info> Backup created in %s: %s', $this->formatDuration($elapsed), basename($archivePath)));
                 $output->writeln(sprintf('  <fg=gray>%s</>', $archivePath));
                 $output->writeln('');
                 $succeeded++;
             } catch (LogicException $e) {
+                $this->clearSpinner($output);
                 $output->writeln('<error>✗ ' . $e->getMessage() . '</error>');
                 $output->writeln('');
                 $failed++;
@@ -129,12 +136,17 @@ final class BackupCommand extends Command
             $output->writeln(sprintf('Backing up <info>%s</info>...', $database));
             $output->writeln('');
 
-            $archivePath = $this->runtime->backupService()->backup($options);
+            $start = microtime(true);
+            $tickCallback = $this->createSpinnerCallback($output, 'Dumping', $start);
+            $archivePath = $this->runtime->backupService()->backup($options, $tickCallback);
+            $this->clearSpinner($output);
+            $elapsed = microtime(true) - $start;
 
-            $output->writeln(sprintf('<info>✓</info> Backup created: %s', basename($archivePath)));
+            $output->writeln(sprintf('<info>✓</info> Backup created in %s: %s', $this->formatDuration($elapsed), basename($archivePath)));
             $output->writeln(sprintf('  <fg=gray>%s</>', $archivePath));
             return Command::SUCCESS;
         } catch (LogicException $e) {
+            $this->clearSpinner($output);
             $output->writeln('<error>✗ ' . $e->getMessage() . '</error>');
             return Command::FAILURE;
         }

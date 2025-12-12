@@ -10,8 +10,9 @@ interface ImportServiceInterface
      * Import a SQL file into a database.
      *
      * @param array<string, mixed> $options
+     * @param callable|null $tickCallback Optional callback called every 100ms during import
      */
-    public function import(array $options): void;
+    public function import(array $options, ?callable $tickCallback = null): void;
 
     /**
      * Check if a file is encrypted (.gpg extension).

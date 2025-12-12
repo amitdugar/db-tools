@@ -18,6 +18,8 @@ use Symfony\Component\Console\Question\Question;
 #[AsCommand(name: 'import', description: 'Import a SQL file into a database')]
 final class ImportCommand extends Command
 {
+    use SpinnerTrait;
+
     public function __construct(private readonly RuntimeInterface $runtime, private readonly ?ProfilesConfig $config = null)
     {
         parent::__construct();
@@ -76,11 +78,14 @@ final class ImportCommand extends Command
             $output->writeln(sprintf('Importing <info>%s</info> into <info>%s</info>...', basename($file), $database));
             $output->writeln('');
             $start = microtime(true);
-            $importService->import($options);
+            $tickCallback = $this->createSpinnerCallback($output, 'Importing', $start);
+            $importService->import($options, $tickCallback);
+            $this->clearSpinner($output);
             $elapsed = microtime(true) - $start;
-            $output->writeln(sprintf('<info>✓</info> Import completed to <info>%s</info> in %.1fs', $database, $elapsed));
+            $output->writeln(sprintf('<info>✓</info> Import completed to <info>%s</info> in %s', $database, $this->formatDuration($elapsed)));
             return Command::SUCCESS;
         } catch (RuntimeException $e) {
+            $this->clearSpinner($output);
             $output->writeln('<error>' . $e->getMessage() . '</error>');
             return Command::FAILURE;
         }

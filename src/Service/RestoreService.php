@@ -22,7 +22,7 @@ final class RestoreService implements RestoreServiceInterface
     /**
      * @param array<string,mixed> $options
      */
-    public function restore(array $options): void
+    public function restore(array $options, ?callable $tickCallback = null): void
     {
         $restoreOptions = $this->fromArray($options);
         $db = $restoreOptions->database;
@@ -44,7 +44,7 @@ final class RestoreService implements RestoreServiceInterface
 
         $sqlPath = $this->extractArchive($restoreOptions);
         $this->recreateDatabase($db);
-        $this->importSql($db, $sqlPath);
+        $this->importSql($db, $sqlPath, $tickCallback);
 
         if (is_file($sqlPath)) {
             @unlink($sqlPath);
@@ -179,7 +179,7 @@ final class RestoreService implements RestoreServiceInterface
         $this->runner->run($cmd, $env);
     }
 
-    private function importSql(DatabaseConfig $db, string $sqlPath): void
+    private function importSql(DatabaseConfig $db, string $sqlPath, ?callable $tickCallback = null): void
     {
         if (!is_file($sqlPath)) {
             throw new RuntimeException("SQL file not found: {$sqlPath}");
@@ -197,7 +197,7 @@ final class RestoreService implements RestoreServiceInterface
         }
 
         $env = $db->password ? ['MYSQL_PWD' => $db->password] : [];
-        $this->runner->runWithFileInput($cmd, $env, $sqlPath);
+        $this->runner->runWithFileInput($cmd, $env, $sqlPath, $tickCallback);
     }
 
     /**

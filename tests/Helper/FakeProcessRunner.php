@@ -15,7 +15,7 @@ final class FakeProcessRunner implements ProcessRunnerInterface
 
     public ?string $lastImport = null;
 
-    public function run(array $command, array $env = []): Process
+    public function run(array $command, array $env = [], ?callable $tickCallback = null): Process
     {
         $this->invocations[] = ['cmd' => $command, 'env' => $env];
 
@@ -37,6 +37,13 @@ final class FakeProcessRunner implements ProcessRunnerInterface
     {
         $this->invocations[] = ['cmd' => $command, 'env' => $env];
         $this->lastImport = $input;
+        return new FakeProcess();
+    }
+
+    public function runWithFileInput(array $command, array $env, string $filePath, ?callable $tickCallback = null): Process
+    {
+        $this->invocations[] = ['cmd' => $command, 'env' => $env];
+        $this->lastImport = file_get_contents($filePath) ?: null;
         return new FakeProcess();
     }
 

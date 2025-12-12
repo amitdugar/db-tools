@@ -20,6 +20,8 @@ use Symfony\Component\Process\Process;
 final class RestoreCommand extends Command
 {
     use BackupListingTrait;
+    use SpinnerTrait;
+
     public function __construct(private readonly RuntimeInterface $runtime, private readonly ?ProfilesConfig $config = null)
     {
         parent::__construct();
@@ -88,12 +90,15 @@ final class RestoreCommand extends Command
             $output->writeln('');
 
             $start = microtime(true);
-            $this->runtime->restoreService()->restore($options);
+            $tickCallback = $this->createSpinnerCallback($output, 'Restoring', $start);
+            $this->runtime->restoreService()->restore($options, $tickCallback);
+            $this->clearSpinner($output);
             $elapsed = microtime(true) - $start;
 
-            $output->writeln(sprintf('<info>✓</info> Restore completed to <info>%s</info> in %.1fs', $database, $elapsed));
+            $output->writeln(sprintf('<info>✓</info> Restore completed to <info>%s</info> in %s', $database, $this->formatDuration($elapsed)));
             return Command::SUCCESS;
         } catch (LogicException $e) {
+            $this->clearSpinner($output);
             $output->writeln('<error>✗ ' . $e->getMessage() . '</error>');
             return Command::FAILURE;
         }

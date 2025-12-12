@@ -19,7 +19,7 @@ final class ImportService implements ImportServiceInterface
     /**
      * @param array<string, mixed> $options
      */
-    public function import(array $options): void
+    public function import(array $options, ?callable $tickCallback = null): void
     {
         foreach (['database', 'file'] as $required) {
             if (!isset($options[$required])) {
@@ -46,7 +46,7 @@ final class ImportService implements ImportServiceInterface
         $needsCleanup = $sqlPath !== $file;
 
         try {
-            $this->importSql($host, $port, $user, $password, $database, $sqlPath);
+            $this->importSql($host, $port, $user, $password, $database, $sqlPath, $tickCallback);
         } finally {
             // Clean up temp file if we extracted
             if ($needsCleanup && is_file($sqlPath)) {
@@ -160,7 +160,7 @@ final class ImportService implements ImportServiceInterface
         return $decryptedPath;
     }
 
-    private function importSql(string $host, ?int $port, ?string $user, ?string $password, string $database, string $sqlPath): void
+    private function importSql(string $host, ?int $port, ?string $user, ?string $password, string $database, string $sqlPath, ?callable $tickCallback = null): void
     {
         if (!is_file($sqlPath)) {
             throw new RuntimeException("SQL file not found: {$sqlPath}");
@@ -179,6 +179,6 @@ final class ImportService implements ImportServiceInterface
 
         $env = $password !== null ? ['MYSQL_PWD' => $password] : [];
 
-        $this->runner->runWithFileInput($cmd, $env, $sqlPath);
+        $this->runner->runWithFileInput($cmd, $env, $sqlPath, $tickCallback);
     }
 }

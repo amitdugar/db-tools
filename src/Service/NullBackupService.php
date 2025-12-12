@@ -8,7 +8,7 @@ use LogicException;
 
 final class NullBackupService implements BackupServiceInterface
 {
-    public function backup(array $options): string
+    public function backup(array $options, ?callable $tickCallback = null): string
     {
         throw new LogicException('BackupServiceInterface is not configured. Provide your own implementation that performs backups.');
     }

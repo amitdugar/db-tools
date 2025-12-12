@@ -15,6 +15,9 @@ use DbTools\Service\NullCleanService;
 use DbTools\Service\NullPitrInfoService;
 use DbTools\Service\NullPitrRestoreService;
 use DbTools\Service\NullBinlogService;
+use DbTools\Service\NullSizeService;
+use DbTools\Service\NullImportService;
+use DbTools\Service\NullMysqlcheckService;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -25,7 +28,7 @@ final class BackupCommandTest extends TestCase
         $service = new class implements BackupServiceInterface {
             /** @var array<string,mixed>|null */
             public ?array $options = null;
-            public function backup(array $options): string
+            public function backup(array $options, ?callable $tickCallback = null): string
             {
                 $this->options = $options;
                 return '/tmp/output.sql.zip';
@@ -43,6 +46,9 @@ final class BackupCommandTest extends TestCase
             public function pitrInfoService(): NullPitrInfoService { return new NullPitrInfoService(); }
             public function pitrRestoreService(): NullPitrRestoreService { return new NullPitrRestoreService(); }
             public function binlogService(): NullBinlogService { return new NullBinlogService(); }
+            public function sizeService(): NullSizeService { return new NullSizeService(); }
+            public function importService(): NullImportService { return new NullImportService(); }
+            public function mysqlcheckService(): NullMysqlcheckService { return new NullMysqlcheckService(); }
         };
 
         $command = new BackupCommand($runtime);

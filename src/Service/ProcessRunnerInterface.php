@@ -13,8 +13,9 @@ interface ProcessRunnerInterface
      *
      * @param list<string> $command
      * @param array<string,string> $env
+     * @param callable|null $tickCallback Optional callback called every 100ms while running
      */
-    public function run(array $command, array $env = []): Process;
+    public function run(array $command, array $env = [], ?callable $tickCallback = null): Process;
 
     /**
      * Run a process with input piping (used for mysqlbinlog streaming).
@@ -31,6 +32,7 @@ interface ProcessRunnerInterface
      * @param list<string> $command
      * @param array<string,string> $env
      * @param string $filePath Path to file to stream as input
+     * @param callable|null $tickCallback Optional callback called every 100ms while running
      */
-    public function runWithFileInput(array $command, array $env, string $filePath): Process;
+    public function runWithFileInput(array $command, array $env, string $filePath, ?callable $tickCallback = null): Process;
 }

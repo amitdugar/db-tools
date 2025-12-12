@@ -9,11 +9,21 @@ use Symfony\Component\Process\Process;
 
 final class ProcessRunner implements ProcessRunnerInterface
 {
-    public function run(array $command, array $env = []): Process
+    public function run(array $command, array $env = [], ?callable $tickCallback = null): Process
     {
         $process = new Process($command, null, $env);
         $process->setTimeout(null);
-        $process->run();
+
+        if ($tickCallback !== null) {
+            // Start async and poll with callback
+            $process->start();
+            while ($process->isRunning()) {
+                $tickCallback();
+                usleep(100000); // 100ms
+            }
+        } else {
+            $process->run();
+        }
 
         if (!$process->isSuccessful()) {
             $message = trim($process->getErrorOutput()) ?: trim($process->getOutput());
@@ -38,7 +48,7 @@ final class ProcessRunner implements ProcessRunnerInterface
         return $process;
     }
 
-    public function runWithFileInput(array $command, array $env, string $filePath): Process
+    public function runWithFileInput(array $command, array $env, string $filePath, ?callable $tickCallback = null): Process
     {
         $handle = fopen($filePath, 'r');
         if ($handle === false) {
@@ -49,7 +59,17 @@ final class ProcessRunner implements ProcessRunnerInterface
             $process = new Process($command, null, $env);
             $process->setTimeout(null);
             $process->setInput($handle);
-            $process->run();
+
+            if ($tickCallback !== null) {
+                // Start async and poll with callback
+                $process->start();
+                while ($process->isRunning()) {
+                    $tickCallback();
+                    usleep(100000); // 100ms
+                }
+            } else {
+                $process->run();
+            }
 
             if (!$process->isSuccessful()) {
                 $message = trim($process->getErrorOutput()) ?: trim($process->getOutput());

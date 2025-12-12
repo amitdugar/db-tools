@@ -21,7 +21,7 @@ final class BackupService implements BackupServiceInterface
     /**
      * @param array<string,mixed> $options
      */
-    public function backup(array $options): string
+    public function backup(array $options, ?callable $tickCallback = null): string
     {
         $backupOptions = $this->fromArray($options);
         $db = $backupOptions->database;
@@ -29,7 +29,7 @@ final class BackupService implements BackupServiceInterface
         $this->logger?->info('Starting backup', ['db' => $db->database]);
 
         $tempSql = $this->createTempFile($backupOptions->outputDir, 'dump-');
-        $this->dumpDatabase($db, $tempSql);
+        $this->dumpDatabase($db, $tempSql, $tickCallback);
 
         $timestamp = gmdate('Ymd-His');
         $note = $backupOptions->note ? '-' . $this->slug($backupOptions->note) : '';
@@ -67,7 +67,7 @@ final class BackupService implements BackupServiceInterface
         return substr(str_replace(['/', '+', '='], '', base64_encode($bytes)), 0, 32);
     }
 
-    private function dumpDatabase(DatabaseConfig $db, string $path): void
+    private function dumpDatabase(DatabaseConfig $db, string $path, ?callable $tickCallback = null): void
     {
         $cmd = [
             'mysqldump',
@@ -89,7 +89,7 @@ final class BackupService implements BackupServiceInterface
         }
 
         $env = $db->password ? ['MYSQL_PWD' => $db->password] : [];
-        $this->runner->run($cmd, $env);
+        $this->runner->run($cmd, $env, $tickCallback);
     }
 
     private function compressSql(string $src, string $dest, ?string $backend, ?string $password): string
