@@ -97,9 +97,32 @@ final class RestoreCommand extends Command
 
             $output->writeln(sprintf('<info>✓</info> Restore completed to <info>%s</info> in %s', $database, $this->formatDuration($elapsed)));
             return Command::SUCCESS;
-        } catch (LogicException $e) {
+        } catch (\Throwable $e) {
             $this->clearSpinner($output);
-            $output->writeln('<error>✗ ' . $e->getMessage() . '</error>');
+            $elapsed = microtime(true) - $start;
+            $message = $e->getMessage();
+
+            $output->writeln('');
+            $output->writeln(sprintf('<error>✗ Restore failed after %s</error>', $this->formatDuration($elapsed)));
+            $output->writeln('');
+
+            // Provide helpful context based on error type
+            if (str_contains($message, 'Lost connection') || str_contains($message, 'server has gone away')) {
+                $output->writeln('<error>MySQL connection was lost during import.</error>');
+                $output->writeln('');
+                $output->writeln('<comment>Possible causes:</comment>');
+                $output->writeln('  • MySQL server timeout (max_allowed_packet, wait_timeout)');
+                $output->writeln('  • Server ran out of memory');
+                $output->writeln('  • Network interruption');
+                $output->writeln('');
+                $output->writeln('<comment>Suggestions:</comment>');
+                $output->writeln('  • Increase max_allowed_packet in MySQL config');
+                $output->writeln('  • Increase wait_timeout and net_read_timeout');
+                $output->writeln('  • Check MySQL server logs for more details');
+            } else {
+                $output->writeln('<error>' . $message . '</error>');
+            }
+
             return Command::FAILURE;
         }
     }
