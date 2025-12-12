@@ -42,8 +42,8 @@ final class RestoreService implements RestoreServiceInterface
             ]);
         }
 
-        $sqlPath = $this->extractArchive($restoreOptions);
-        $this->recreateDatabase($db);
+        $sqlPath = $this->extractArchive($restoreOptions, $tickCallback);
+        $this->recreateDatabase($db, $tickCallback);
         $this->importSql($db, $sqlPath, $tickCallback);
 
         if (is_file($sqlPath)) {
@@ -53,7 +53,7 @@ final class RestoreService implements RestoreServiceInterface
         $this->logger?->info('Restore finished', ['db' => $db->database]);
     }
 
-    private function extractArchive(RestoreOptions $options): string
+    private function extractArchive(RestoreOptions $options, ?callable $tickCallback = null): string
     {
         $archive = realpath($options->archive) ?: $options->archive;
         if (!is_file($archive)) {
@@ -75,7 +75,7 @@ final class RestoreService implements RestoreServiceInterface
             if ($password === null) {
                 throw new RuntimeException('Archive is encrypted; provide --encryption-password or ensure filename contains random string');
             }
-            $archive = $this->decryptFile($archive, $password, $tempDir);
+            $archive = $this->decryptFile($archive, $password, $tempDir, $tickCallback);
             $ext = strtolower(pathinfo($archive, PATHINFO_EXTENSION));
         }
 
@@ -84,7 +84,7 @@ final class RestoreService implements RestoreServiceInterface
             if ($password === null) {
                 throw new RuntimeException('Archive is encrypted; provide --encryption-password');
             }
-            $archive = $this->decryptFileLegacy($archive, $password, $tempDir);
+            $archive = $this->decryptFileLegacy($archive, $password, $tempDir, $tickCallback);
             $ext = strtolower(pathinfo($archive, PATHINFO_EXTENSION));
         }
 
@@ -96,7 +96,7 @@ final class RestoreService implements RestoreServiceInterface
             return ArchiveUtility::extractPasswordProtectedZip($archive, $password, $tempDir);
         }
 
-        $sqlPath = ArchiveUtility::decompressToFile($archive, $tempDir);
+        $sqlPath = ArchiveUtility::decompressToFile($archive, $tempDir, $tickCallback);
         $lower = strtolower(pathinfo($sqlPath, PATHINFO_EXTENSION));
         if ($lower !== 'sql') {
             throw new RuntimeException("Expected SQL after extraction, got .{$lower}");
@@ -120,7 +120,7 @@ final class RestoreService implements RestoreServiceInterface
         return null;
     }
 
-    private function decryptFile(string $encryptedPath, string $password, string $tempDir): string
+    private function decryptFile(string $encryptedPath, string $password, string $tempDir, ?callable $tickCallback = null): string
     {
         // Remove .gpg extension to get the original filename
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($encryptedPath, '.gpg');
@@ -134,12 +134,12 @@ final class RestoreService implements RestoreServiceInterface
             $encryptedPath,
         ];
 
-        $this->runner->run($cmd);
+        $this->runner->run($cmd, [], $tickCallback);
 
         return $decryptedPath;
     }
 
-    private function decryptFileLegacy(string $encryptedPath, string $password, string $tempDir): string
+    private function decryptFileLegacy(string $encryptedPath, string $password, string $tempDir, ?callable $tickCallback = null): string
     {
         // Remove .enc extension to get the original filename (legacy openssl format)
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($encryptedPath, '.enc');
@@ -151,12 +151,12 @@ final class RestoreService implements RestoreServiceInterface
             '-pass', 'pass:' . $password,
         ];
 
-        $this->runner->run($cmd);
+        $this->runner->run($cmd, [], $tickCallback);
 
         return $decryptedPath;
     }
 
-    private function recreateDatabase(DatabaseConfig $db): void
+    private function recreateDatabase(DatabaseConfig $db, ?callable $tickCallback = null): void
     {
         $commands = [
             sprintf('DROP DATABASE IF EXISTS `%s`;', $db->database),
@@ -176,7 +176,7 @@ final class RestoreService implements RestoreServiceInterface
         }
 
         $env = $db->password ? ['MYSQL_PWD' => $db->password] : [];
-        $this->runner->run($cmd, $env);
+        $this->runner->run($cmd, $env, $tickCallback);
     }
 
     private function importSql(DatabaseConfig $db, string $sqlPath, ?callable $tickCallback = null): void
