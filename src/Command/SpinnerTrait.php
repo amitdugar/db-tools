@@ -19,10 +19,11 @@ trait SpinnerTrait
     {
         $charIndex = 0;
 
-        return function () use ($output, $message, $startTime, &$charIndex): void {
+        return function () use ($message, $startTime, &$charIndex): void {
             $elapsed = microtime(true) - $startTime;
             $spinner = self::$spinnerChars[$charIndex % \count(self::$spinnerChars)];
-            $output->write(sprintf("\r  %s %s… %s  ", $spinner, $message, $this->formatDuration($elapsed)));
+            // Write directly to STDERR for immediate display (unbuffered)
+            fwrite(STDERR, sprintf("\r  %s %s… %s  ", $spinner, $message, $this->formatDuration($elapsed)));
             $charIndex++;
         };
     }
@@ -32,7 +33,8 @@ trait SpinnerTrait
      */
     private function clearSpinner(OutputInterface $output): void
     {
-        $output->write("\r" . str_repeat(' ', 50) . "\r");
+        // Write directly to STDERR to match spinner output
+        fwrite(STDERR, "\r" . str_repeat(' ', 50) . "\r");
     }
 
     /**
