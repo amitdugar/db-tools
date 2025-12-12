@@ -39,7 +39,7 @@ final class RestoreService implements RestoreServiceInterface
                 'output_dir' => dirname($restoreOptions->archive),
                 'note' => 'pre-restore',
                 'label' => $db->database,
-            ]);
+            ], $tickCallback);
         }
 
         $sqlPath = $this->extractArchive($restoreOptions, $tickCallback);

@@ -42,7 +42,7 @@ final class ImportService implements ImportServiceInterface
         $this->logger?->info('Importing SQL file', ['file' => $file, 'database' => $database]);
 
         // Get SQL content (handles decompression and decryption)
-        $sqlPath = $this->extractFile($file, $encryptionPassword, $password);
+        $sqlPath = $this->extractFile($file, $encryptionPassword, $password, $tickCallback);
         $needsCleanup = $sqlPath !== $file;
 
         try {
@@ -91,7 +91,7 @@ final class ImportService implements ImportServiceInterface
         }
     }
 
-    private function extractFile(string $file, ?string $encryptionPassword, ?string $dbPassword): string
+    private function extractFile(string $file, ?string $encryptionPassword, ?string $dbPassword, ?callable $tickCallback = null): string
     {
         $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'dbtools-import';
         if (!is_dir($tempDir) && !@mkdir($tempDir, 0777, true)) {
@@ -106,7 +106,7 @@ final class ImportService implements ImportServiceInterface
             if ($password === null) {
                 throw new RuntimeException('Archive is encrypted; provide --encryption-password or database password');
             }
-            $file = $this->decryptFile($file, $password, $tempDir);
+            $file = $this->decryptFile($file, $password, $tempDir, $tickCallback);
             $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
         }
 
@@ -121,7 +121,7 @@ final class ImportService implements ImportServiceInterface
 
         // Handle compressed files (.gz, .zst, .zip)
         if (\in_array($ext, ['gz', 'zst', 'zip'], true)) {
-            return ArchiveUtility::decompressToFile($file, $tempDir);
+            return ArchiveUtility::decompressToFile($file, $tempDir, $tickCallback);
         }
 
         // Plain SQL - return as-is
@@ -143,7 +143,7 @@ final class ImportService implements ImportServiceInterface
         return null;
     }
 
-    private function decryptFile(string $encryptedPath, string $password, string $tempDir): string
+    private function decryptFile(string $encryptedPath, string $password, string $tempDir, ?callable $tickCallback = null): string
     {
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($encryptedPath, '.gpg');
 
@@ -155,7 +155,7 @@ final class ImportService implements ImportServiceInterface
             $encryptedPath,
         ];
 
-        $this->runner->run($cmd);
+        $this->runner->run($cmd, [], $tickCallback);
 
         return $decryptedPath;
     }
