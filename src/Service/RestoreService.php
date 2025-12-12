@@ -43,7 +43,13 @@ final class RestoreService implements RestoreServiceInterface
         }
 
         $sqlPath = $this->extractArchive($restoreOptions, $tickCallback);
+        if ($tickCallback !== null) {
+            $tickCallback();
+        }
         $this->recreateDatabase($db, $tickCallback);
+        if ($tickCallback !== null) {
+            $tickCallback();
+        }
         $this->importSql($db, $sqlPath, $tickCallback);
 
         if (is_file($sqlPath)) {
