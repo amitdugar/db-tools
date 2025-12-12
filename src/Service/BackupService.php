@@ -50,7 +50,7 @@ final class BackupService implements BackupServiceInterface
             : sprintf('%s-%s%s.sql', $label, $timestamp, $note);
 
         $dest = rtrim($backupOptions->outputDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $destBase;
-        $archivePath = $this->compressSql($tempSql, $dest, $backupOptions->compressionBackend, $encryptionPassword);
+        $archivePath = $this->compressSql($tempSql, $dest, $backupOptions->compressionBackend, $encryptionPassword, $tickCallback);
 
         @unlink($tempSql);
         $this->writeMetadata($archivePath, $db, $note, $backupOptions, $randomString !== null);
@@ -92,7 +92,7 @@ final class BackupService implements BackupServiceInterface
         $this->runner->run($cmd, $env, $tickCallback);
     }
 
-    private function compressSql(string $src, string $dest, ?string $backend, ?string $password): string
+    private function compressSql(string $src, string $dest, ?string $backend, ?string $password, ?callable $tickCallback = null): string
     {
         $backend ??= ArchiveUtility::pickBestBackend();
         $destWithExt = ArchiveUtility::compressFile($src, $dest, $backend);
@@ -101,14 +101,14 @@ final class BackupService implements BackupServiceInterface
             if ($backend === ArchiveUtility::BACKEND_ZIP) {
                 $destWithExt = $this->repackZipWithPassword($destWithExt, $password);
             } else {
-                $destWithExt = $this->encryptFile($destWithExt, $password);
+                $destWithExt = $this->encryptFile($destWithExt, $password, $tickCallback);
             }
         }
 
         return $destWithExt;
     }
 
-    private function encryptFile(string $path, string $password): string
+    private function encryptFile(string $path, string $password, ?callable $tickCallback = null): string
     {
         $encryptedPath = $path . '.gpg';
 
@@ -121,7 +121,7 @@ final class BackupService implements BackupServiceInterface
             $path,
         ];
 
-        $this->runner->run($cmd);
+        $this->runner->run($cmd, [], $tickCallback);
         @unlink($path);
 
         return $encryptedPath;
