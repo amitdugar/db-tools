@@ -11,6 +11,7 @@ interface RestoreServiceInterface
      *
      * @param array<string,mixed> $options
      * @param callable|null $tickCallback Optional callback called every 100ms during import
+     * @return array{archive_size: int, sql_size: int} File sizes for display
      */
-    public function restore(array $options, ?callable $tickCallback = null): void;
+    public function restore(array $options, ?callable $tickCallback = null): array;
 }

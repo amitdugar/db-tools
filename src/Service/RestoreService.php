@@ -21,12 +21,16 @@ final class RestoreService implements RestoreServiceInterface
 
     /**
      * @param array<string,mixed> $options
+     * @return array{archive_size: int, sql_size: int} File sizes for display
      */
-    public function restore(array $options, ?callable $tickCallback = null): void
+    public function restore(array $options, ?callable $tickCallback = null): array
     {
         $restoreOptions = $this->fromArray($options);
         $db = $restoreOptions->database;
         $this->logger?->info('Starting restore', ['archive' => $restoreOptions->archive, 'db' => $db->database]);
+
+        // Get archive size before starting
+        $archiveSize = is_file($restoreOptions->archive) ? (int) filesize($restoreOptions->archive) : 0;
 
         if (!$restoreOptions->skipSafetyBackup) {
             $this->logger?->info('Creating safety backup');
@@ -43,6 +47,10 @@ final class RestoreService implements RestoreServiceInterface
         }
 
         $sqlPath = $this->extractArchive($restoreOptions, $tickCallback);
+
+        // Get raw SQL file size after extraction
+        $sqlSize = is_file($sqlPath) ? (int) filesize($sqlPath) : 0;
+
         if ($tickCallback !== null) {
             $tickCallback();
         }
@@ -57,6 +65,11 @@ final class RestoreService implements RestoreServiceInterface
         }
 
         $this->logger?->info('Restore finished', ['db' => $db->database]);
+
+        return [
+            'archive_size' => $archiveSize,
+            'sql_size' => $sqlSize,
+        ];
     }
 
     private function extractArchive(RestoreOptions $options, ?callable $tickCallback = null): string

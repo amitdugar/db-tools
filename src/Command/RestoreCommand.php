@@ -86,16 +86,32 @@ final class RestoreCommand extends Command
         ];
 
         try {
-            $output->writeln(sprintf('Restoring <info>%s</info> to database <info>%s</info>...', basename($archive), $database));
+            $archiveSize = is_file($archive) ? (int) filesize($archive) : 0;
+            $output->writeln(sprintf(
+                'Restoring <info>%s</info> <fg=gray>(%s)</> to database <info>%s</info>...',
+                basename($archive),
+                $this->formatSize($archiveSize),
+                $database
+            ));
             $output->writeln('');
 
             $start = microtime(true);
             $tickCallback = $this->createSpinnerCallback($output, 'Restoring', $start);
-            $this->runtime->restoreService()->restore($options, $tickCallback);
+            $result = $this->runtime->restoreService()->restore($options, $tickCallback);
             $this->clearSpinner($output);
             $elapsed = microtime(true) - $start;
 
-            $output->writeln(sprintf('<info>✓</info> Restore completed to <info>%s</info> in %s', $database, $this->formatDuration($elapsed)));
+            // Show size info - if archive and SQL are same size, it's uncompressed
+            $sizeInfo = $result['archive_size'] === $result['sql_size']
+                ? sprintf('%s', $this->formatSize($result['sql_size']))
+                : sprintf('%s compressed → %s raw', $this->formatSize($result['archive_size']), $this->formatSize($result['sql_size']));
+
+            $output->writeln(sprintf(
+                '<info>✓</info> Restore completed to <info>%s</info> in %s <fg=gray>(%s)</>',
+                $database,
+                $this->formatDuration($elapsed),
+                $sizeInfo
+            ));
             return Command::SUCCESS;
         } catch (\Throwable $e) {
             $this->clearSpinner($output);
