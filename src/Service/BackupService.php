@@ -95,7 +95,7 @@ final class BackupService implements BackupServiceInterface
     private function compressSql(string $src, string $dest, ?string $backend, ?string $password, ?callable $tickCallback = null): string
     {
         $backend ??= ArchiveUtility::pickBestBackend();
-        $destWithExt = ArchiveUtility::compressFile($src, $dest, $backend);
+        $destWithExt = ArchiveUtility::compressFile($src, $dest, $backend, $tickCallback);
 
         if ($password) {
             if ($backend === ArchiveUtility::BACKEND_ZIP) {
