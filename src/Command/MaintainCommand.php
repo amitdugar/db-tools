@@ -33,33 +33,57 @@ final class MaintainCommand extends Command
             ->addOption('password', null, InputOption::VALUE_REQUIRED, 'Database password')
             ->addOption('profile', 'p', InputOption::VALUE_REQUIRED, 'Profile name to use (or DBTOOLS_PROFILE)')
             ->addOption('days', null, InputOption::VALUE_REQUIRED, 'Purge binlogs older than N days', '7')
-            ->addOption('all', null, InputOption::VALUE_NONE, 'Run mysqlcheck on all configured profiles');
+            ->addOption('optimize', 'o', InputOption::VALUE_NONE, 'Also run OPTIMIZE TABLE (slower, reclaims disk space)')
+            ->addOption('all', null, InputOption::VALUE_NONE, 'Run on all configured profiles');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $days = (int) $input->getOption('days');
+        $runOptimize = (bool) $input->getOption('optimize');
         $hasErrors = false;
+
+        $stepCount = $runOptimize ? 3 : 2;
+        $currentStep = 0;
 
         $output->writeln('===========================================');
         $output->writeln('  DATABASE MAINTENANCE');
         $output->writeln('===========================================');
         $output->writeln('');
 
-        // Step 1: MySQL Check (supports --all)
-        $output->writeln('Step 1/2: Running database check/optimization...');
+        // Step 1: Analyze tables
+        $currentStep++;
+        $output->writeln(\sprintf('Step %d/%d: Analyzing tables (updating statistics)...', $currentStep, $stepCount));
         $output->writeln('');
 
         if ($input->getOption('all')) {
-            $hasErrors = $this->runMysqlcheckAll($output) || $hasErrors;
+            $hasErrors = $this->runMysqlcheckAll($input, $output, 'analyze') || $hasErrors;
         } else {
-            $hasErrors = $this->runMysqlcheckSingle($input, $output) || $hasErrors;
+            $hasErrors = $this->runMysqlcheckSingle($input, $output, 'analyze') || $hasErrors;
         }
 
         $output->writeln('');
 
-        // Step 2: Purge Binary Logs (runs once, uses first/default profile for connection)
-        $output->writeln(\sprintf('Step 2/2: Cleaning up binary logs (older than %d days)...', $days));
+        // Step 2 (optional): Optimize tables
+        if ($runOptimize) {
+            $currentStep++;
+            $output->writeln(\sprintf('Step %d/%d: Optimizing tables (defragmenting, this may take a while)...', $currentStep, $stepCount));
+            $output->writeln('');
+
+            if ($input->getOption('all')) {
+                $hasErrors = $this->runMysqlcheckAll($input, $output, 'optimize') || $hasErrors;
+            } else {
+                $hasErrors = $this->runMysqlcheckSingle($input, $output, 'optimize') || $hasErrors;
+            }
+
+            $output->writeln('');
+        }
+
+        $output->writeln('');
+
+        // Final step: Purge Binary Logs (runs once, uses first/default profile for connection)
+        $currentStep++;
+        $output->writeln(\sprintf('Step %d/%d: Cleaning up binary logs (older than %d days)...', $currentStep, $stepCount, $days));
 
         $profile = $this->config?->getProfile($this->resolveProfileName($input));
         $database = $input->getArgument('database') ?: getenv('DBTOOLS_DATABASE') ?: $profile?->database;
@@ -93,7 +117,7 @@ final class MaintainCommand extends Command
         return $hasErrors ? Command::FAILURE : Command::SUCCESS;
     }
 
-    private function runMysqlcheckAll(OutputInterface $output): bool
+    private function runMysqlcheckAll(InputInterface $input, OutputInterface $output, string $operation): bool
     {
         if ($this->config === null) {
             $output->writeln('<error>No profiles configured</error>');
@@ -107,9 +131,10 @@ final class MaintainCommand extends Command
         }
 
         $hasErrors = false;
+        $operationLabel = $this->getOperationLabel($operation);
 
         foreach ($profiles as $name => $profile) {
-            $output->writeln(\sprintf('Checking <info>%s</info> [%s]...', $profile->database ?? $name, $name));
+            $output->writeln(\sprintf('%s <info>%s</info> [%s]...', $operationLabel, $profile->database ?? $name, $name));
 
             $options = [
                 'database' => (string) $profile->database,
@@ -120,8 +145,8 @@ final class MaintainCommand extends Command
             ];
 
             try {
-                $results = $this->runtime->mysqlcheckService()->check($options);
-                $this->displayMysqlcheckSummary($output, $results);
+                $results = $this->runOperation($operation, $options);
+                $this->displayMysqlcheckSummary($output, $results, $operation);
             } catch (RuntimeException $e) {
                 $output->writeln('  <error>Failed: ' . $e->getMessage() . '</error>');
                 $hasErrors = true;
@@ -133,7 +158,7 @@ final class MaintainCommand extends Command
         return $hasErrors;
     }
 
-    private function runMysqlcheckSingle(InputInterface $input, OutputInterface $output): bool
+    private function runMysqlcheckSingle(InputInterface $input, OutputInterface $output, string $operation): bool
     {
         $profile = $this->config?->getProfile($this->resolveProfileName($input));
         $database = $input->getArgument('database') ?: getenv('DBTOOLS_DATABASE') ?: $profile?->database;
@@ -151,11 +176,12 @@ final class MaintainCommand extends Command
             'password' => $this->resolveString($input, 'password', 'DBTOOLS_PASSWORD', $profile?->password),
         ];
 
-        $output->writeln(\sprintf('Checking <info>%s</info>...', $database));
+        $operationLabel = $this->getOperationLabel($operation);
+        $output->writeln(\sprintf('%s <info>%s</info>...', $operationLabel, $database));
 
         try {
-            $results = $this->runtime->mysqlcheckService()->check($options);
-            $this->displayMysqlcheckSummary($output, $results);
+            $results = $this->runOperation($operation, $options);
+            $this->displayMysqlcheckSummary($output, $results, $operation);
             return false;
         } catch (RuntimeException $e) {
             $output->writeln('  <error>Failed: ' . $e->getMessage() . '</error>');
@@ -164,16 +190,45 @@ final class MaintainCommand extends Command
     }
 
     /**
+     * @param array<string, mixed> $options
+     * @return array<string, array{status: string, message: string}>
+     */
+    private function runOperation(string $operation, array $options): array
+    {
+        $service = $this->runtime->mysqlcheckService();
+        return match ($operation) {
+            'analyze' => $service->analyze($options),
+            'optimize' => $service->optimize($options),
+            default => $service->check($options),
+        };
+    }
+
+    private function getOperationLabel(string $operation): string
+    {
+        return match ($operation) {
+            'analyze' => 'Analyzing',
+            'optimize' => 'Optimizing',
+            default => 'Checking',
+        };
+    }
+
+    /**
      * @param array<string, array{status: string, message: string}> $results
      */
-    private function displayMysqlcheckSummary(OutputInterface $output, array $results): void
+    private function displayMysqlcheckSummary(OutputInterface $output, array $results, string $operation): void
     {
         $total = \count($results);
         $ok = \count(array_filter($results, fn($r) => $r['status'] === 'ok'));
         $errors = \count(array_filter($results, fn($r) => $r['status'] === 'error'));
         $warnings = \count(array_filter($results, fn($r) => $r['status'] === 'warning'));
 
-        $summary = \sprintf('  %d tables checked', $total);
+        $verb = match ($operation) {
+            'analyze' => 'analyzed',
+            'optimize' => 'optimized',
+            default => 'checked',
+        };
+
+        $summary = \sprintf('  %d tables %s', $total, $verb);
         if ($ok > 0) {
             $summary .= \sprintf(', <info>%d OK</info>', $ok);
         }
