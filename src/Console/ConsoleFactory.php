@@ -20,6 +20,7 @@ use DbTools\Command\ListCommand;
 use DbTools\Command\SizeCommand;
 use DbTools\Command\ImportCommand;
 use DbTools\Command\MysqlcheckCommand;
+use DbTools\Command\MaintainCommand;
 use DbTools\Command\DbTestCommand;
 use DbTools\Config\ProfilesConfig;
 use DbTools\Service\RuntimeInterface;
@@ -29,7 +30,7 @@ final class ConsoleFactory
 {
     public static function create(RuntimeInterface $runtime, ?ProfilesConfig $config = null): Application
     {
-        $app = new Application('db-tools', '1.0.0');
+        $app = new Application('db-tools', '1.0.11');
 
         $app->add(new BackupCommand($runtime, $config));
         $app->add(new RestoreCommand($runtime, $config));
@@ -47,6 +48,7 @@ final class ConsoleFactory
         $app->add(new SizeCommand($runtime, $config));
         $app->add(new ImportCommand($runtime, $config));
         $app->add(new MysqlcheckCommand($runtime, $config));
+        $app->add(new MaintainCommand($runtime, $config));
         $app->add(new DbTestCommand($runtime, $config));
 
         return $app;
