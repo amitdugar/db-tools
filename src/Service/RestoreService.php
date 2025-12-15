@@ -40,9 +40,8 @@ final class RestoreService implements RestoreServiceInterface
                 'user' => $db->user,
                 'password' => $db->password,
                 'port' => $db->port,
-                'output_dir' => dirname($restoreOptions->archive),
-                'note' => 'pre-restore',
-                'label' => $db->database,
+                'output_dir' => $restoreOptions->outputDir ?? dirname($restoreOptions->archive),
+                'label' => 'pre-restore-' . $db->database,
             ], $tickCallback);
         }
 
@@ -245,6 +244,7 @@ final class RestoreService implements RestoreServiceInterface
             skipSafetyBackup: (bool) ($options['skip_safety_backup'] ?? false),
             encryptionPassword: isset($options['encryption_password']) ? (string) $options['encryption_password'] : null,
             tempDir: isset($options['temp_dir']) ? (string) $options['temp_dir'] : null,
+            outputDir: isset($options['output_dir']) ? (string) $options['output_dir'] : null,
         );
     }
 }

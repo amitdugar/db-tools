@@ -28,7 +28,7 @@ final class BackupService implements BackupServiceInterface
 
         $this->logger?->info('Starting backup', ['db' => $db->database]);
 
-        $tempSql = $this->createTempFile($backupOptions->outputDir, 'dump-');
+        $tempSql = $this->createTempFile(sys_get_temp_dir(), 'dbtools-dump-');
         $this->dumpDatabase($db, $tempSql, $tickCallback);
 
         $timestamp = gmdate('Ymd-His');

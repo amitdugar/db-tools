@@ -83,6 +83,7 @@ final class RestoreCommand extends Command
             'force' => (bool) $input->getOption('force'),
             'skip_safety_backup' => (bool) $input->getOption('skip-safety-backup'),
             'encryption_password' => $input->getOption('encryption-password') ?? $profile?->encryptionPassword,
+            'output_dir' => $input->getOption('output-dir') ?: $profile?->outputDir,
         ];
 
         try {

@@ -13,6 +13,7 @@ final class RestoreOptions
         public readonly bool $skipSafetyBackup = false,
         public readonly ?string $encryptionPassword = null,
         public readonly ?string $tempDir = null,
+        public readonly ?string $outputDir = null,
     ) {
     }
 }
