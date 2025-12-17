@@ -36,6 +36,7 @@ final class CollationCommand extends Command
             ->addOption('skip-columns', 's', InputOption::VALUE_NONE, 'Skip individual column conversion (only convert tables)')
             ->addOption('dry-run', 'd', InputOption::VALUE_NONE, 'Show what would be converted without making changes')
             ->addOption('batch-size', 'b', InputOption::VALUE_REQUIRED, 'Process tables in batches (for memory management)', '0')
+            ->addOption('disable-fk-checks', 'f', InputOption::VALUE_NONE, 'Disable foreign key checks when converting tables with FK errors')
             ->addOption('profile', 'p', InputOption::VALUE_REQUIRED, 'Profile name to use (or DBTOOLS_PROFILE)')
             ->addOption('all', null, InputOption::VALUE_NONE, 'Run on all configured profiles');
     }
@@ -106,6 +107,7 @@ final class CollationCommand extends Command
             'dry_run' => (bool) $input->getOption('dry-run'),
             'skip_columns' => (bool) $input->getOption('skip-columns'),
             'table' => $input->getOption('table'),
+            'disable_fk_checks' => (bool) $input->getOption('disable-fk-checks'),
         ];
 
         try {
@@ -133,6 +135,7 @@ final class CollationCommand extends Command
             'dry_run' => (bool) $input->getOption('dry-run'),
             'skip_columns' => (bool) $input->getOption('skip-columns'),
             'table' => $input->getOption('table'),
+            'disable_fk_checks' => (bool) $input->getOption('disable-fk-checks'),
         ];
     }
 
@@ -180,6 +183,12 @@ final class CollationCommand extends Command
         // Progress callback for output
         $options['callback'] = function (string $event, string $table, array $data) use ($output, $verbose): void {
             switch ($event) {
+                case 'dependencies_detected':
+                    $count = $data['count'] ?? 0;
+                    $output->writeln(\sprintf('<info>Detected %d FK relationship(s) - tables will be converted in dependency order</info>', $count));
+                    $output->writeln('');
+                    break;
+
                 case 'table_start':
                     if ($verbose) {
                         $size = isset($data['size_mb']) ? \sprintf(' (%.1f MB)', $data['size_mb']) : '';
@@ -209,12 +218,20 @@ final class CollationCommand extends Command
                     $output->writeln(\sprintf('  <fg=green>+</> Converted table <info>%s</info>%s', $table, $duration));
                     break;
 
+                case 'table_converted_with_fk_disabled':
+                    $duration = isset($data['duration']) ? \sprintf(' in %.2fs', $data['duration']) : '';
+                    $output->writeln(\sprintf('  <fg=green>+</> Converted table <info>%s</info>%s <fg=yellow>(FK checks disabled)</>', $table, $duration));
+                    break;
+
                 case 'table_dry_run':
                     $output->writeln(\sprintf('  <fg=yellow>~</> Would convert table <info>%s</info> from %s', $table, $data['current_collation'] ?? 'unknown'));
                     break;
 
                 case 'table_error':
                     $output->writeln(\sprintf('  <fg=red>x</> Error converting table <info>%s</info>: %s', $table, $data['error'] ?? 'Unknown error'));
+                    if (($data['is_fk_error'] ?? false) && !($options['disable_fk_checks'] ?? false)) {
+                        $output->writeln('      <fg=yellow>Hint:</> Use -f/--disable-fk-checks to retry with FK checks disabled');
+                    }
                     break;
 
                 case 'column_start':

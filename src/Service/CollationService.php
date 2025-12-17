@@ -67,6 +67,7 @@ final class CollationService implements CollationServiceInterface
         $skipColumns = (bool) ($options['skip_columns'] ?? false);
         $specificTable = $options['table'] ?? null;
         $callback = $options['callback'] ?? null;
+        $disableFkChecks = (bool) ($options['disable_fk_checks'] ?? false);
 
         $result = [
             'tables_converted' => 0,
@@ -88,6 +89,22 @@ final class CollationService implements CollationServiceInterface
 
         if ($specificTable !== null) {
             $tables = array_filter($tables, fn($t) => $t['table'] === $specificTable);
+        } else {
+            // Sort tables by FK dependencies (parents before children)
+            $dependencies = $this->getForeignKeyDependencies($options);
+            $tableNames = array_column($tables, 'table');
+            $sortedNames = $this->sortTablesByDependencies($tableNames, $dependencies);
+
+            // Reorder $tables array to match sorted order
+            $tablesByName = [];
+            foreach ($tables as $t) {
+                $tablesByName[$t['table']] = $t;
+            }
+            $tables = array_map(fn($name) => $tablesByName[$name], $sortedNames);
+
+            if ($callback !== null && $dependencies !== []) {
+                $callback('dependencies_detected', '', ['count' => \count($dependencies)]);
+            }
         }
 
         foreach ($tables as $tableInfo) {
@@ -125,11 +142,40 @@ final class CollationService implements CollationServiceInterface
                             $callback('table_converted', $tableName, [...$tableInfo, 'duration' => $duration]);
                         }
                     } catch (RuntimeException $e) {
-                        $result['errors'][] = "Table {$tableName}: " . $e->getMessage();
-                        if ($callback !== null) {
-                            $callback('table_error', $tableName, ['error' => $e->getMessage()]);
+                        // Check if this is an FK incompatibility error (ERROR 3780)
+                        $isFkError = str_contains($e->getMessage(), '3780') || str_contains($e->getMessage(), 'foreign key constraint');
+
+                        if ($isFkError && $disableFkChecks) {
+                            // Retry with FK checks disabled
+                            try {
+                                $startTime = microtime(true);
+                                $sql = \sprintf(
+                                    'SET FOREIGN_KEY_CHECKS=0; ALTER TABLE `%s` CONVERT TO CHARACTER SET %s COLLATE %s; SET FOREIGN_KEY_CHECKS=1;',
+                                    $tableName,
+                                    $charset,
+                                    $targetCollation
+                                );
+                                $this->runQuery($options, $sql);
+                                $duration = round(microtime(true) - $startTime, 2);
+                                $result['tables_converted']++;
+
+                                if ($callback !== null) {
+                                    $callback('table_converted_with_fk_disabled', $tableName, [...$tableInfo, 'duration' => $duration]);
+                                }
+                            } catch (RuntimeException $retryError) {
+                                $result['errors'][] = "Table {$tableName}: " . $retryError->getMessage();
+                                if ($callback !== null) {
+                                    $callback('table_error', $tableName, ['error' => $retryError->getMessage()]);
+                                }
+                                continue;
+                            }
+                        } else {
+                            $result['errors'][] = "Table {$tableName}: " . $e->getMessage();
+                            if ($callback !== null) {
+                                $callback('table_error', $tableName, ['error' => $e->getMessage(), 'is_fk_error' => $isFkError]);
+                            }
+                            continue; // Skip column conversion if table conversion failed
                         }
-                        continue; // Skip column conversion if table conversion failed
                     }
                 } else {
                     $result['tables_skipped']++;
@@ -334,6 +380,121 @@ final class CollationService implements CollationServiceInterface
         }
 
         return $columns;
+    }
+
+    /**
+     * Get foreign key relationships for all tables in the database.
+     * Returns a map of child table => list of parent tables (tables it references).
+     *
+     * @param array<string, mixed> $options
+     * @return array<string, list<string>>
+     */
+    public function getForeignKeyDependencies(array $options): array
+    {
+        $database = $options['database'] ?? null;
+        if ($database === null) {
+            throw new RuntimeException('Missing required option: database');
+        }
+
+        $sql = \sprintf(
+            "SELECT
+                TABLE_NAME as child_table,
+                REFERENCED_TABLE_NAME as parent_table
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = '%s'
+            AND REFERENCED_TABLE_SCHEMA = '%s'
+            AND REFERENCED_TABLE_NAME IS NOT NULL
+            GROUP BY TABLE_NAME, REFERENCED_TABLE_NAME",
+            addslashes($database),
+            addslashes($database)
+        );
+
+        $output = $this->runQuery($options, $sql);
+        $dependencies = [];
+
+        $lines = array_filter(explode("\n", trim($output)));
+        array_shift($lines); // Skip header
+
+        foreach ($lines as $line) {
+            $parts = preg_split('/\t/', $line);
+            if (\count($parts) >= 2) {
+                $childTable = $parts[0] ?? '';
+                $parentTable = $parts[1] ?? '';
+                if ($childTable !== '' && $parentTable !== '') {
+                    if (!isset($dependencies[$childTable])) {
+                        $dependencies[$childTable] = [];
+                    }
+                    if (!\in_array($parentTable, $dependencies[$childTable], true)) {
+                        $dependencies[$childTable][] = $parentTable;
+                    }
+                }
+            }
+        }
+
+        return $dependencies;
+    }
+
+    /**
+     * Sort tables in dependency order (parents before children).
+     * Tables with no FK dependencies come first, then tables in order of their dependencies.
+     *
+     * @param list<string> $tables List of table names
+     * @param array<string, list<string>> $dependencies Map of child => parents
+     * @return list<string> Tables sorted so parents come before children
+     */
+    public function sortTablesByDependencies(array $tables, array $dependencies): array
+    {
+        // Build reverse lookup: which tables depend on each table
+        $dependents = [];
+        foreach ($tables as $table) {
+            $dependents[$table] = [];
+        }
+        foreach ($dependencies as $child => $parents) {
+            foreach ($parents as $parent) {
+                if (isset($dependents[$parent])) {
+                    $dependents[$parent][] = $child;
+                }
+            }
+        }
+
+        // Kahn's algorithm for topological sort
+        $inDegree = [];
+        foreach ($tables as $table) {
+            // Count how many parents this table has (that are in our table list)
+            $parents = $dependencies[$table] ?? [];
+            $inDegree[$table] = \count(array_filter($parents, fn($p) => \in_array($p, $tables, true)));
+        }
+
+        // Start with tables that have no dependencies
+        $queue = [];
+        foreach ($tables as $table) {
+            if ($inDegree[$table] === 0) {
+                $queue[] = $table;
+            }
+        }
+
+        $sorted = [];
+        while ($queue !== []) {
+            $table = array_shift($queue);
+            $sorted[] = $table;
+
+            // Reduce in-degree for all tables that depend on this one
+            foreach ($dependents[$table] as $dependent) {
+                $inDegree[$dependent]--;
+                if ($inDegree[$dependent] === 0) {
+                    $queue[] = $dependent;
+                }
+            }
+        }
+
+        // If we didn't get all tables, there's a cycle - add remaining tables at the end
+        $remaining = array_diff($tables, $sorted);
+        if ($remaining !== []) {
+            $this->logger?->warning('Circular FK dependencies detected', ['tables' => array_values($remaining)]);
+            $sorted = [...$sorted, ...array_values($remaining)];
+        }
+
+        return $sorted;
     }
 
     /**
