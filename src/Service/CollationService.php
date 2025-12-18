@@ -67,7 +67,7 @@ final class CollationService implements CollationServiceInterface
         $skipColumns = (bool) ($options['skip_columns'] ?? false);
         $specificTable = $options['table'] ?? null;
         $callback = $options['callback'] ?? null;
-        $disableFkChecks = (bool) ($options['disable_fk_checks'] ?? false);
+        $disableFkChecks = (bool) ($options['disable_fk_checks'] ?? true);
 
         $result = [
             'tables_converted' => 0,

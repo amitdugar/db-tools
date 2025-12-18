@@ -36,7 +36,7 @@ final class CollationCommand extends Command
             ->addOption('skip-columns', 's', InputOption::VALUE_NONE, 'Skip individual column conversion (only convert tables)')
             ->addOption('dry-run', 'd', InputOption::VALUE_NONE, 'Show what would be converted without making changes')
             ->addOption('batch-size', 'b', InputOption::VALUE_REQUIRED, 'Process tables in batches (for memory management)', '0')
-            ->addOption('disable-fk-checks', 'f', InputOption::VALUE_NONE, 'Disable foreign key checks when converting tables with FK errors')
+            ->addOption('enforce-fk-checks', null, InputOption::VALUE_NONE, 'Enforce foreign key checks (by default, FK checks are disabled during conversion)')
             ->addOption('profile', 'p', InputOption::VALUE_REQUIRED, 'Profile name to use (or DBTOOLS_PROFILE)')
             ->addOption('all', null, InputOption::VALUE_NONE, 'Run on all configured profiles');
     }
@@ -107,7 +107,7 @@ final class CollationCommand extends Command
             'dry_run' => (bool) $input->getOption('dry-run'),
             'skip_columns' => (bool) $input->getOption('skip-columns'),
             'table' => $input->getOption('table'),
-            'disable_fk_checks' => (bool) $input->getOption('disable-fk-checks'),
+            'disable_fk_checks' => !$input->getOption('enforce-fk-checks'),
         ];
 
         try {
@@ -135,7 +135,7 @@ final class CollationCommand extends Command
             'dry_run' => (bool) $input->getOption('dry-run'),
             'skip_columns' => (bool) $input->getOption('skip-columns'),
             'table' => $input->getOption('table'),
-            'disable_fk_checks' => (bool) $input->getOption('disable-fk-checks'),
+            'disable_fk_checks' => !$input->getOption('enforce-fk-checks'),
         ];
     }
 
@@ -191,18 +191,15 @@ final class CollationCommand extends Command
 
                 case 'fk_tables_need_conversion':
                     $fkTables = $data['tables'] ?? [];
-                    $output->writeln(\sprintf('<fg=yellow>Warning:</> %d table(s) with FK relationships need conversion:', \count($fkTables)));
+                    $output->writeln(\sprintf('<fg=yellow>Warning:</> %d table(s) with FK relationships need conversion (FK checks enforced):', \count($fkTables)));
                     foreach ($fkTables as $t) {
                         $output->writeln(\sprintf('  - %s', $t));
                     }
-                    $output->writeln('<fg=yellow>Hint:</> Use -f/--disable-fk-checks to convert these tables');
                     $output->writeln('');
                     break;
 
                 case 'fk_checks_disabled':
-                    $fkTables = $data['tables'] ?? [];
-                    $output->writeln(\sprintf('<fg=cyan>FK checks will be disabled</> for %d table(s) with FK relationships', \count($fkTables)));
-                    $output->writeln('');
+                    // Silent by default since this is now the normal behavior
                     break;
 
                 case 'table_start':
@@ -240,9 +237,6 @@ final class CollationCommand extends Command
 
                 case 'table_error':
                     $output->writeln(\sprintf('  <fg=red>x</> Error converting table <info>%s</info>: %s', $table, $data['error'] ?? 'Unknown error'));
-                    if (($data['is_fk_error'] ?? false) && !($options['disable_fk_checks'] ?? false)) {
-                        $output->writeln('      <fg=yellow>Hint:</> Use -f/--disable-fk-checks to retry with FK checks disabled');
-                    }
                     break;
 
                 case 'column_start':
