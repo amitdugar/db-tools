@@ -189,6 +189,26 @@ final class CollationCommand extends Command
                     $output->writeln('');
                     break;
 
+                case 'fk_tables_need_conversion':
+                    $fkTables = $data['tables'] ?? [];
+                    $output->writeln(\sprintf('<fg=yellow>Warning:</> %d table(s) with FK relationships need conversion:', \count($fkTables)));
+                    foreach ($fkTables as $t) {
+                        $output->writeln(\sprintf('  - %s', $t));
+                    }
+                    $output->writeln('<fg=yellow>Hint:</> Use -f/--disable-fk-checks to convert these tables');
+                    $output->writeln('');
+                    break;
+
+                case 'fk_checks_disabled':
+                    $fkTables = $data['tables'] ?? [];
+                    $output->writeln(\sprintf('<fg=cyan>FK checks disabled</> for %d table(s) with FK relationships', \count($fkTables)));
+                    $output->writeln('');
+                    break;
+
+                case 'fk_checks_restored':
+                    $output->writeln('<fg=cyan>FK checks restored</>');
+                    break;
+
                 case 'table_start':
                     if ($verbose) {
                         $size = isset($data['size_mb']) ? \sprintf(' (%.1f MB)', $data['size_mb']) : '';
@@ -216,11 +236,6 @@ final class CollationCommand extends Command
                 case 'table_converted':
                     $duration = isset($data['duration']) ? \sprintf(' in %.2fs', $data['duration']) : '';
                     $output->writeln(\sprintf('  <fg=green>+</> Converted table <info>%s</info>%s', $table, $duration));
-                    break;
-
-                case 'table_converted_with_fk_disabled':
-                    $duration = isset($data['duration']) ? \sprintf(' in %.2fs', $data['duration']) : '';
-                    $output->writeln(\sprintf('  <fg=green>+</> Converted table <info>%s</info>%s <fg=yellow>(FK checks disabled)</>', $table, $duration));
                     break;
 
                 case 'table_dry_run':

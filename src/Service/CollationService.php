@@ -87,6 +87,7 @@ final class CollationService implements CollationServiceInterface
         // Get all tables
         $tables = $this->getTables($options);
 
+        $dependencies = [];
         if ($specificTable !== null) {
             $tables = array_filter($tables, fn($t) => $t['table'] === $specificTable);
         } else {
@@ -107,6 +108,40 @@ final class CollationService implements CollationServiceInterface
             }
         }
 
+        // Check if any tables with FK relationships need conversion
+        $tablesNeedingConversion = array_filter($tables, fn($t) => $t['current_collation'] !== $targetCollation);
+        $fkTablesNeedConversion = [];
+        foreach ($tablesNeedingConversion as $t) {
+            $tableName = $t['table'];
+            // Check if this table is involved in any FK relationship (as parent or child)
+            $isChild = isset($dependencies[$tableName]);
+            $isParent = false;
+            foreach ($dependencies as $parents) {
+                if (\in_array($tableName, $parents, true)) {
+                    $isParent = true;
+                    break;
+                }
+            }
+            if ($isChild || $isParent) {
+                $fkTablesNeedConversion[] = $tableName;
+            }
+        }
+
+        // If we have FK-related tables that need conversion, disable FK checks globally
+        $globalFkDisabled = false;
+        if ($fkTablesNeedConversion !== [] && !$dryRun) {
+            if ($disableFkChecks) {
+                $this->runQuery($options, 'SET FOREIGN_KEY_CHECKS=0');
+                $globalFkDisabled = true;
+                if ($callback !== null) {
+                    $callback('fk_checks_disabled', '', ['tables' => $fkTablesNeedConversion]);
+                }
+            } elseif ($callback !== null) {
+                $callback('fk_tables_need_conversion', '', ['tables' => $fkTablesNeedConversion]);
+            }
+        }
+
+        try {
         foreach ($tables as $tableInfo) {
             $tableName = $tableInfo['table'];
 
@@ -144,38 +179,11 @@ final class CollationService implements CollationServiceInterface
                     } catch (RuntimeException $e) {
                         // Check if this is an FK incompatibility error (ERROR 3780)
                         $isFkError = str_contains($e->getMessage(), '3780') || str_contains($e->getMessage(), 'foreign key constraint');
-
-                        if ($isFkError && $disableFkChecks) {
-                            // Retry with FK checks disabled
-                            try {
-                                $startTime = microtime(true);
-                                $sql = \sprintf(
-                                    'SET FOREIGN_KEY_CHECKS=0; ALTER TABLE `%s` CONVERT TO CHARACTER SET %s COLLATE %s; SET FOREIGN_KEY_CHECKS=1;',
-                                    $tableName,
-                                    $charset,
-                                    $targetCollation
-                                );
-                                $this->runQuery($options, $sql);
-                                $duration = round(microtime(true) - $startTime, 2);
-                                $result['tables_converted']++;
-
-                                if ($callback !== null) {
-                                    $callback('table_converted_with_fk_disabled', $tableName, [...$tableInfo, 'duration' => $duration]);
-                                }
-                            } catch (RuntimeException $retryError) {
-                                $result['errors'][] = "Table {$tableName}: " . $retryError->getMessage();
-                                if ($callback !== null) {
-                                    $callback('table_error', $tableName, ['error' => $retryError->getMessage()]);
-                                }
-                                continue;
-                            }
-                        } else {
-                            $result['errors'][] = "Table {$tableName}: " . $e->getMessage();
-                            if ($callback !== null) {
-                                $callback('table_error', $tableName, ['error' => $e->getMessage(), 'is_fk_error' => $isFkError]);
-                            }
-                            continue; // Skip column conversion if table conversion failed
+                        $result['errors'][] = "Table {$tableName}: " . $e->getMessage();
+                        if ($callback !== null) {
+                            $callback('table_error', $tableName, ['error' => $e->getMessage(), 'is_fk_error' => $isFkError]);
                         }
+                        continue; // Skip column conversion if table conversion failed
                     }
                 } else {
                     $result['tables_skipped']++;
@@ -252,6 +260,15 @@ final class CollationService implements CollationServiceInterface
                             $callback('column_dry_run', $tableName, [...$columnInfo, 'sql' => "ALTER TABLE `{$tableName}` MODIFY COLUMN {$columnDef}"]);
                         }
                     }
+                }
+            }
+        }
+        } finally {
+            // Re-enable FK checks if we disabled them globally
+            if ($globalFkDisabled) {
+                $this->runQuery($options, 'SET FOREIGN_KEY_CHECKS=1');
+                if ($callback !== null) {
+                    $callback('fk_checks_restored', '', []);
                 }
             }
         }
