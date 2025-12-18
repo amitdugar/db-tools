@@ -127,12 +127,9 @@ final class CollationService implements CollationServiceInterface
             }
         }
 
-        // If we have FK-related tables that need conversion, disable FK checks globally
-        $globalFkDisabled = false;
+        // If we have FK-related tables that need conversion, warn or prepare to disable FK checks
         if ($fkTablesNeedConversion !== [] && !$dryRun) {
             if ($disableFkChecks) {
-                $this->runQuery($options, 'SET FOREIGN_KEY_CHECKS=0');
-                $globalFkDisabled = true;
                 if ($callback !== null) {
                     $callback('fk_checks_disabled', '', ['tables' => $fkTablesNeedConversion]);
                 }
@@ -141,7 +138,6 @@ final class CollationService implements CollationServiceInterface
             }
         }
 
-        try {
         foreach ($tables as $tableInfo) {
             $tableName = $tableInfo['table'];
 
@@ -163,12 +159,22 @@ final class CollationService implements CollationServiceInterface
                 if (!$dryRun) {
                     try {
                         $startTime = microtime(true);
-                        $sql = \sprintf(
-                            'ALTER TABLE `%s` CONVERT TO CHARACTER SET %s COLLATE %s',
-                            $tableName,
-                            $charset,
-                            $targetCollation
-                        );
+                        // Include FK check disable in same query if flag is set (must be same session)
+                        if ($disableFkChecks) {
+                            $sql = \sprintf(
+                                'SET FOREIGN_KEY_CHECKS=0; ALTER TABLE `%s` CONVERT TO CHARACTER SET %s COLLATE %s; SET FOREIGN_KEY_CHECKS=1;',
+                                $tableName,
+                                $charset,
+                                $targetCollation
+                            );
+                        } else {
+                            $sql = \sprintf(
+                                'ALTER TABLE `%s` CONVERT TO CHARACTER SET %s COLLATE %s',
+                                $tableName,
+                                $charset,
+                                $targetCollation
+                            );
+                        }
                         $this->runQuery($options, $sql);
                         $duration = round(microtime(true) - $startTime, 2);
                         $result['tables_converted']++;
@@ -260,15 +266,6 @@ final class CollationService implements CollationServiceInterface
                             $callback('column_dry_run', $tableName, [...$columnInfo, 'sql' => "ALTER TABLE `{$tableName}` MODIFY COLUMN {$columnDef}"]);
                         }
                     }
-                }
-            }
-        }
-        } finally {
-            // Re-enable FK checks if we disabled them globally
-            if ($globalFkDisabled) {
-                $this->runQuery($options, 'SET FOREIGN_KEY_CHECKS=1');
-                if ($callback !== null) {
-                    $callback('fk_checks_restored', '', []);
                 }
             }
         }

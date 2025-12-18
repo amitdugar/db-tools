@@ -201,12 +201,8 @@ final class CollationCommand extends Command
 
                 case 'fk_checks_disabled':
                     $fkTables = $data['tables'] ?? [];
-                    $output->writeln(\sprintf('<fg=cyan>FK checks disabled</> for %d table(s) with FK relationships', \count($fkTables)));
+                    $output->writeln(\sprintf('<fg=cyan>FK checks will be disabled</> for %d table(s) with FK relationships', \count($fkTables)));
                     $output->writeln('');
-                    break;
-
-                case 'fk_checks_restored':
-                    $output->writeln('<fg=cyan>FK checks restored</>');
                     break;
 
                 case 'table_start':
