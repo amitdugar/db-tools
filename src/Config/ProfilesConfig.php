@@ -34,6 +34,10 @@ final class ProfilesConfig
             return $this->profiles[$name];
         }
 
+        if ($name !== null) {
+            return null;
+        }
+
         if ($this->defaultProfile !== null && isset($this->profiles[$this->defaultProfile])) {
             return $this->profiles[$this->defaultProfile];
         }

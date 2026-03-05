@@ -30,6 +30,13 @@ final class ListCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $requestedProfile = $this->requestedProfileName($input);
+        if ($requestedProfile !== null && $this->config?->getProfile($requestedProfile) === null) {
+            $output->writeln(sprintf('<error>Profile not found:</error> %s', $requestedProfile));
+            $output->writeln('Run <info>db-tools config:list</info> to see available profiles.');
+            return Command::FAILURE;
+        }
+
         $outputDir = $input->getOption('output-dir') ?: (getenv('DBTOOLS_OUTPUT_DIR') ?: null) ?? $this->config?->getProfile($this->resolveProfileName($input))?->outputDir;
 
         if ($outputDir === null || $outputDir === '') {
@@ -95,5 +102,20 @@ final class ListCommand extends Command
             return (string) $env;
         }
         return $this->config?->defaultProfile();
+    }
+
+    private function requestedProfileName(InputInterface $input): ?string
+    {
+        $val = $input->getOption('profile');
+        if ($val !== null && $val !== '') {
+            return (string) $val;
+        }
+
+        $env = getenv('DBTOOLS_PROFILE');
+        if ($env !== false && $env !== '') {
+            return (string) $env;
+        }
+
+        return null;
     }
 }

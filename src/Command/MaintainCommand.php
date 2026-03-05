@@ -42,6 +42,12 @@ final class MaintainCommand extends Command
         $days = (int) $input->getOption('days');
         $runOptimize = (bool) $input->getOption('optimize');
         $hasErrors = false;
+        $requestedProfile = $this->requestedProfileName($input);
+        if ($requestedProfile !== null && $this->config?->getProfile($requestedProfile) === null) {
+            $output->writeln(sprintf('<error>Profile not found:</error> %s', $requestedProfile));
+            $output->writeln('Run <info>db-tools config:list</info> to see available profiles.');
+            return Command::FAILURE;
+        }
 
         $stepCount = $runOptimize ? 3 : 2;
         $currentStep = 0;
@@ -253,6 +259,21 @@ final class MaintainCommand extends Command
             return (string) $env;
         }
         return $this->config?->defaultProfile();
+    }
+
+    private function requestedProfileName(InputInterface $input): ?string
+    {
+        $val = $input->getOption('profile');
+        if ($val !== null && $val !== '') {
+            return (string) $val;
+        }
+
+        $env = getenv('DBTOOLS_PROFILE');
+        if ($env !== false && $env !== '') {
+            return (string) $env;
+        }
+
+        return null;
     }
 
     private function resolveInt(InputInterface $input, string $option, string $env, ?int $fallback): ?int

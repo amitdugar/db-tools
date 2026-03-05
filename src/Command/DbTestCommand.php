@@ -84,7 +84,13 @@ final class DbTestCommand extends Command
 
     private function executeSingle(InputInterface $input, OutputInterface $output): int
     {
+        $requestedProfile = $this->requestedProfileName($input);
         $profile = $this->config?->getProfile($this->resolveProfileName($input));
+        if ($requestedProfile !== null && $profile === null) {
+            $output->writeln(sprintf('<error>Profile not found:</error> %s', $requestedProfile));
+            $output->writeln('Run <info>db-tools config:list</info> to see available profiles.');
+            return Command::FAILURE;
+        }
         $database = $input->getArgument('database') ?: getenv('DBTOOLS_DATABASE') ?: $profile?->database;
 
         $host = $this->resolveHost($input, $profile?->host);
@@ -225,6 +231,21 @@ final class DbTestCommand extends Command
             return (string) $env;
         }
         return $this->config?->defaultProfile();
+    }
+
+    private function requestedProfileName(InputInterface $input): ?string
+    {
+        $val = $input->getOption('profile');
+        if ($val !== null && $val !== '') {
+            return (string) $val;
+        }
+
+        $env = getenv('DBTOOLS_PROFILE');
+        if ($env !== false && $env !== '') {
+            return (string) $env;
+        }
+
+        return null;
     }
 
     private function resolveInt(InputInterface $input, string $option, string $env, ?int $fallback): ?int
