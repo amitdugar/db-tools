@@ -10,10 +10,14 @@ use RuntimeException;
 
 final class ImportService implements ImportServiceInterface
 {
+    private readonly TempFileRegistry $tempRegistry;
+
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
+        ?TempFileRegistry $tempRegistry = null,
     ) {
+        $this->tempRegistry = $tempRegistry ?? new TempFileRegistry();
     }
 
     /**
@@ -41,16 +45,24 @@ final class ImportService implements ImportServiceInterface
 
         $this->logger?->info('Importing SQL file', ['file' => $file, 'database' => $database]);
 
-        // Get SQL content (handles decompression and decryption)
+        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+        $derivedPassword = $encryptionPassword ?? $this->derivePasswordFromFilename($file, $password);
+
+        // Try streaming path
+        if ($this->canStream($file, $ext, $derivedPassword)) {
+            $this->importStreaming($file, $ext, $derivedPassword, $host, $port, $user, $password, $database, $tickCallback);
+            return;
+        }
+
+        // Fallback: extract to temp file, import, clean up
         $sqlPath = $this->extractFile($file, $encryptionPassword, $password, $tickCallback);
         $needsCleanup = $sqlPath !== $file;
 
         try {
             $this->importSql($host, $port, $user, $password, $database, $sqlPath, $tickCallback);
         } finally {
-            // Clean up temp file if we extracted
-            if ($needsCleanup && is_file($sqlPath)) {
-                @unlink($sqlPath);
+            if ($needsCleanup) {
+                $this->tempRegistry->cleanup();
             }
         }
     }
@@ -83,7 +95,6 @@ final class ImportService implements ImportServiceInterface
             $this->runner->run($cmd);
             return $decryptedPath;
         } catch (RuntimeException) {
-            // Decryption failed
             if (is_file($decryptedPath)) {
                 @unlink($decryptedPath);
             }
@@ -91,12 +102,85 @@ final class ImportService implements ImportServiceInterface
         }
     }
 
+    private function canStream(string $file, string $ext, ?string $password): bool
+    {
+        if ($ext === 'gpg' && $password !== null) {
+            $inner = strtolower(pathinfo(pathinfo($file, PATHINFO_FILENAME), PATHINFO_EXTENSION));
+            return in_array($inner, ['zst', 'gz'], true);
+        }
+
+        return in_array($ext, ['zst', 'gz'], true);
+    }
+
+    /**
+     * Stream: [gpg -d |] decompressor | mysql
+     */
+    private function importStreaming(
+        string $file,
+        string $ext,
+        ?string $encryptionPassword,
+        string $host,
+        ?int $port,
+        ?string $user,
+        ?string $dbPassword,
+        string $database,
+        ?callable $tickCallback,
+    ): void {
+        $pipeline = [];
+
+        if ($ext === 'gpg') {
+            $pipeline[] = [
+                'gpg', '--batch', '--yes',
+                '--passphrase', $encryptionPassword,
+                '--decrypt', $file,
+            ];
+            $innerExt = strtolower(pathinfo(pathinfo($file, PATHINFO_FILENAME), PATHINFO_EXTENSION));
+        } else {
+            $innerExt = $ext;
+        }
+
+        $pipeline[] = $this->buildDecompressCommand($innerExt, $ext === 'gpg' ? null : $file);
+        $pipeline[] = $this->buildMysqlCommand($host, $port, $user, $database);
+
+        $env = $dbPassword !== null ? ['MYSQL_PWD' => $dbPassword] : [];
+        $this->runner->runPipeline($pipeline, $env, $tickCallback);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildDecompressCommand(string $ext, ?string $inputFile): array
+    {
+        return match ($ext) {
+            'zst' => $inputFile !== null ? ['zstd', '-dc', $inputFile] : ['zstd', '-dc'],
+            'gz' => $inputFile !== null ? ['pigz', '-dc', $inputFile] : ['pigz', '-dc'],
+            default => throw new RuntimeException("Unsupported streaming decompression: .{$ext}"),
+        };
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildMysqlCommand(string $host, ?int $port, ?string $user, string $database): array
+    {
+        $cmd = ['mysql', '--host=' . $host];
+
+        if ($port !== null) {
+            $cmd[] = '--port=' . $port;
+        }
+        if ($user !== null) {
+            $cmd[] = '--user=' . $user;
+        }
+
+        $cmd[] = $database;
+
+        return $cmd;
+    }
+
     private function extractFile(string $file, ?string $encryptionPassword, ?string $dbPassword, ?callable $tickCallback = null): string
     {
-        $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'dbtools-import';
-        if (!is_dir($tempDir) && !@mkdir($tempDir, 0777, true)) {
-            throw new RuntimeException("Unable to create temp directory: {$tempDir}");
-        }
+        $tempBase = TempFileRegistry::resolveTempBase();
+        $tempDir = $this->tempRegistry->createTempDir($tempBase, 'dbtools-import-');
 
         $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
 
@@ -130,11 +214,8 @@ final class ImportService implements ImportServiceInterface
 
     private function derivePasswordFromFilename(string $archivePath, ?string $dbPassword): ?string
     {
-        // Extract random string from filename (VLSM-compatible format)
-        // Format: label-YYYYMMDD-HHMMSS-RANDOMSTRING.sql.zst.gpg
         $basename = basename($archivePath);
 
-        // Match: name-YYYYMMDD-HHMMSS-RANDOMSTRING (32 alphanumeric chars)
         if (preg_match('/-(\d{8})-(\d{6})-([A-Za-z0-9]{32})/', $basename, $matches)) {
             $randomString = $matches[3];
             return ($dbPassword ?? '') . $randomString;

@@ -30,7 +30,7 @@ final class ConsoleFactory
 {
     public static function create(RuntimeInterface $runtime, ?ProfilesConfig $config = null): Application
     {
-        $app = new Application('db-tools', '2.0.0');
+        $app = new Application('db-tools', '2.1.0');
 
         $app->add(new BackupCommand($runtime, $config));
         $app->add(new RestoreCommand($runtime, $config));

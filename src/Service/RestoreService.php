@@ -12,11 +12,15 @@ use RuntimeException;
 
 final class RestoreService implements RestoreServiceInterface
 {
+    private readonly TempFileRegistry $tempRegistry;
+
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly BackupServiceInterface $backupService = new NullBackupService(),
         private readonly ?LoggerInterface $logger = null,
+        ?TempFileRegistry $tempRegistry = null,
     ) {
+        $this->tempRegistry = $tempRegistry ?? new TempFileRegistry();
     }
 
     /**
@@ -29,7 +33,6 @@ final class RestoreService implements RestoreServiceInterface
         $db = $restoreOptions->database;
         $this->logger?->info('Starting restore', ['archive' => $restoreOptions->archive, 'db' => $db->database]);
 
-        // Get archive size before starting
         $archiveSize = is_file($restoreOptions->archive) ? (int) filesize($restoreOptions->archive) : 0;
 
         if (!$restoreOptions->skipSafetyBackup) {
@@ -45,11 +48,6 @@ final class RestoreService implements RestoreServiceInterface
             ], $tickCallback);
         }
 
-        $sqlPath = $this->extractArchive($restoreOptions, $tickCallback);
-
-        // Get raw SQL file size after extraction
-        $sqlSize = is_file($sqlPath) ? (int) filesize($sqlPath) : 0;
-
         if ($tickCallback !== null) {
             $tickCallback();
         }
@@ -57,10 +55,30 @@ final class RestoreService implements RestoreServiceInterface
         if ($tickCallback !== null) {
             $tickCallback();
         }
-        $this->importSql($db, $sqlPath, $tickCallback);
 
-        if (is_file($sqlPath)) {
-            @unlink($sqlPath);
+        $archive = realpath($restoreOptions->archive) ?: $restoreOptions->archive;
+        if (!is_file($archive)) {
+            throw new RuntimeException("Archive not found: {$archive}");
+        }
+
+        $ext = strtolower(pathinfo($archive, PATHINFO_EXTENSION));
+        $password = $restoreOptions->encryptionPassword ?? $this->derivePasswordFromFilename($archive, $db->password);
+
+        // Determine if we can stream
+        $canStream = $this->canStream($archive, $ext, $password);
+
+        if ($canStream) {
+            $this->restoreStreaming($archive, $ext, $password, $db, $tickCallback);
+            $sqlSize = 0; // Unknown when streaming — not materialized
+        } else {
+            // Fallback: extract to temp, import, clean up
+            $sqlPath = $this->extractArchive($restoreOptions, $tickCallback);
+            $sqlSize = is_file($sqlPath) ? (int) filesize($sqlPath) : 0;
+            try {
+                $this->importSql($db, $sqlPath, $tickCallback);
+            } finally {
+                $this->tempRegistry->cleanup();
+            }
         }
 
         $this->logger?->info('Restore finished', ['db' => $db->database]);
@@ -71,6 +89,83 @@ final class RestoreService implements RestoreServiceInterface
         ];
     }
 
+    /**
+     * Can we stream this archive directly into mysql without temp files?
+     */
+    private function canStream(string $archive, string $ext, ?string $password): bool
+    {
+        // Encrypted .gpg wrapping a .zst or .gz — streamable
+        if ($ext === 'gpg' && $password !== null) {
+            $inner = strtolower(pathinfo(pathinfo($archive, PATHINFO_FILENAME), PATHINFO_EXTENSION));
+            return in_array($inner, ['zst', 'gz'], true);
+        }
+
+        // Plain .zst or .gz — streamable
+        return in_array($ext, ['zst', 'gz'], true);
+    }
+
+    /**
+     * Stream: [gpg -d |] decompressor | mysql
+     */
+    private function restoreStreaming(
+        string $archive,
+        string $ext,
+        ?string $password,
+        DatabaseConfig $db,
+        ?callable $tickCallback,
+    ): void {
+        $pipeline = [];
+
+        if ($ext === 'gpg') {
+            $pipeline[] = [
+                'gpg', '--batch', '--yes',
+                '--passphrase', $password,
+                '--decrypt', $archive,
+            ];
+            // Determine inner extension
+            $innerExt = strtolower(pathinfo(pathinfo($archive, PATHINFO_FILENAME), PATHINFO_EXTENSION));
+        } else {
+            $innerExt = $ext;
+        }
+
+        $pipeline[] = $this->buildDecompressCommand($innerExt, $ext === 'gpg' ? null : $archive);
+        $pipeline[] = $this->buildMysqlCommand($db);
+
+        $env = $db->password ? ['MYSQL_PWD' => $db->password] : [];
+        $this->runner->runPipeline($pipeline, $env, $tickCallback);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildDecompressCommand(string $ext, ?string $inputFile): array
+    {
+        return match ($ext) {
+            'zst' => $inputFile !== null ? ['zstd', '-dc', $inputFile] : ['zstd', '-dc'],
+            'gz' => $inputFile !== null ? ['pigz', '-dc', $inputFile] : ['pigz', '-dc'],
+            default => throw new RuntimeException("Unsupported streaming decompression: .{$ext}"),
+        };
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildMysqlCommand(DatabaseConfig $db): array
+    {
+        $cmd = [
+            'mysql',
+            '--host=' . $db->host,
+            '--user=' . ($db->user ?? ''),
+            $db->database,
+        ];
+
+        if ($db->port) {
+            $cmd[] = '--port=' . $db->port;
+        }
+
+        return $cmd;
+    }
+
     private function extractArchive(RestoreOptions $options, ?callable $tickCallback = null): string
     {
         $archive = realpath($options->archive) ?: $options->archive;
@@ -78,17 +173,14 @@ final class RestoreService implements RestoreServiceInterface
             throw new RuntimeException("Archive not found: {$archive}");
         }
 
-        $tempDir = $options->tempDir ?? sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'dbtools-restore';
-        if (!is_dir($tempDir) && !@mkdir($tempDir, 0777, true)) {
-            throw new RuntimeException("Unable to create temp directory: {$tempDir}");
-        }
+        $tempBase = TempFileRegistry::resolveTempBase($options->tempDir);
+        $tempDir = $this->tempRegistry->createTempDir($tempBase, 'dbtools-restore-');
 
-        // Derive password from filename (DB_PASSWORD + randomString) or use explicit password
         $password = $options->encryptionPassword ?? $this->derivePasswordFromFilename($archive, $options->database->password);
 
         $ext = strtolower(pathinfo($archive, PATHINFO_EXTENSION));
 
-        // Handle .gpg encrypted files (GPG encrypted - VLSM-compatible)
+        // Handle .gpg encrypted files
         if ($ext === 'gpg') {
             if ($password === null) {
                 throw new RuntimeException('Archive is encrypted; provide --encryption-password or ensure filename contains random string');
@@ -125,11 +217,8 @@ final class RestoreService implements RestoreServiceInterface
 
     private function derivePasswordFromFilename(string $archivePath, ?string $dbPassword): ?string
     {
-        // Extract random string from filename (VLSM-compatible format)
-        // Format: label-YYYYMMDD-HHMMSS-RANDOMSTRING.sql.zst.gpg or label-YYYYMMDD-HHMMSS-RANDOMSTRING-note.sql.zst.gpg
         $basename = basename($archivePath);
 
-        // Match: name-YYYYMMDD-HHMMSS-RANDOMSTRING (32 alphanumeric chars)
         if (preg_match('/-(\d{8})-(\d{6})-([A-Za-z0-9]{32})/', $basename, $matches)) {
             $randomString = $matches[3];
             return ($dbPassword ?? '') . $randomString;
@@ -140,10 +229,8 @@ final class RestoreService implements RestoreServiceInterface
 
     private function decryptFile(string $encryptedPath, string $password, string $tempDir, ?callable $tickCallback = null): string
     {
-        // Remove .gpg extension to get the original filename
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($encryptedPath, '.gpg');
 
-        // Use GPG for decryption (VLSM-compatible)
         $cmd = [
             'gpg', '--batch', '--yes',
             '--passphrase', $password,
@@ -159,7 +246,6 @@ final class RestoreService implements RestoreServiceInterface
 
     private function decryptFileLegacy(string $encryptedPath, string $password, string $tempDir, ?callable $tickCallback = null): string
     {
-        // Remove .enc extension to get the original filename (legacy openssl format)
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($encryptedPath, '.enc');
 
         $cmd = [

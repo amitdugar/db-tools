@@ -12,10 +12,14 @@ use RuntimeException;
 
 final class BackupService implements BackupServiceInterface
 {
+    private readonly TempFileRegistry $tempRegistry;
+
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
+        ?TempFileRegistry $tempRegistry = null,
     ) {
+        $this->tempRegistry = $tempRegistry ?? new TempFileRegistry();
     }
 
     /**
@@ -27,9 +31,6 @@ final class BackupService implements BackupServiceInterface
         $db = $backupOptions->database;
 
         $this->logger?->info('Starting backup', ['db' => $db->database]);
-
-        $tempSql = $this->createTempFile(sys_get_temp_dir(), 'dbtools-dump-');
-        $this->dumpDatabase($db, $tempSql, $tickCallback);
 
         $timestamp = gmdate('Ymd-His');
         $note = $backupOptions->note ? '-' . $this->slug($backupOptions->note) : '';
@@ -50,9 +51,17 @@ final class BackupService implements BackupServiceInterface
             : sprintf('%s-%s%s.sql', $label, $timestamp, $note);
 
         $dest = rtrim($backupOptions->outputDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $destBase;
-        $archivePath = $this->compressSql($tempSql, $dest, $backupOptions->compressionBackend, $encryptionPassword, $tickCallback);
 
-        @unlink($tempSql);
+        $backend = $backupOptions->compressionBackend ?? ArchiveUtility::pickBestBackend();
+
+        if ($backend === ArchiveUtility::BACKEND_ZIP) {
+            // ZIP is not stream-friendly — fall back to temp file approach
+            $archivePath = $this->backupViaTemp($db, $dest, $backend, $encryptionPassword, $backupOptions, $tickCallback);
+        } else {
+            // Stream: mysqldump | compressor [| gpg] > final
+            $archivePath = $this->backupStreaming($db, $dest, $backend, $encryptionPassword, $tickCallback);
+        }
+
         $this->writeMetadata($archivePath, $db, $note, $backupOptions, $randomString !== null);
         $this->applyRetention($backupOptions);
 
@@ -60,14 +69,149 @@ final class BackupService implements BackupServiceInterface
         return $archivePath;
     }
 
+    /**
+     * Streaming backup: mysqldump | compressor [| gpg] > output file.
+     * Zero temp files on disk.
+     */
+    private function backupStreaming(
+        DatabaseConfig $db,
+        string $dest,
+        string $backend,
+        ?string $encryptionPassword,
+        ?callable $tickCallback,
+    ): string {
+        $dumpCmd = $this->buildDumpCommand($db);
+        $compressCmd = $this->buildCompressCommand($backend);
+        $ext = ArchiveUtility::extensionForBackend($backend);
+        $destWithExt = $dest . $ext;
+
+        $pipeline = [$dumpCmd, $compressCmd];
+
+        if ($encryptionPassword !== null) {
+            $gpgDestWithExt = $destWithExt . '.gpg';
+            $pipeline[] = [
+                'gpg', '--batch', '--yes',
+                '--passphrase', $encryptionPassword,
+                '--symmetric', '--cipher-algo', 'AES256',
+            ];
+            // Build shell pipeline that redirects last stage to file
+            $this->runPipelineToFile($pipeline, $gpgDestWithExt, $db->password, $tickCallback);
+            return $gpgDestWithExt;
+        }
+
+        $this->runPipelineToFile($pipeline, $destWithExt, $db->password, $tickCallback);
+        return $destWithExt;
+    }
+
+    /**
+     * Run a pipeline of commands, writing the last stage's stdout to $outputPath.
+     *
+     * @param list<list<string>> $pipeline
+     */
+    private function runPipelineToFile(array $pipeline, string $outputPath, ?string $dbPassword, ?callable $tickCallback): void
+    {
+        // Build shell command: cmd1 | cmd2 | ... > outputPath
+        $parts = [];
+        foreach ($pipeline as $cmd) {
+            $parts[] = implode(' ', array_map('escapeshellarg', $cmd));
+        }
+        $shell = implode(' | ', $parts) . ' > ' . escapeshellarg($outputPath);
+
+        $env = $dbPassword ? ['MYSQL_PWD' => $dbPassword] : [];
+        $fullEnv = $env + getenv();
+
+        $descriptors = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        // Register output for cleanup in case of failure
+        $this->tempRegistry->register($outputPath);
+
+        $process = proc_open($shell, $descriptors, $pipes, null, $fullEnv);
+        if (!is_resource($process)) {
+            throw new RuntimeException('Failed to start pipeline');
+        }
+
+        fclose($pipes[0]); // close stdin
+        fclose($pipes[1]); // we redirect stdout to file via shell
+
+        try {
+            $running = true;
+            while ($running) {
+                if ($tickCallback !== null) {
+                    $tickCallback();
+                }
+                usleep(100_000);
+                $status = proc_get_status($process);
+                $running = $status['running'];
+            }
+
+            $stderr = stream_get_contents($pipes[2]) ?: '';
+            fclose($pipes[2]);
+
+            $status = proc_get_status($process);
+            $exitCode = $status['exitcode'];
+            if ($exitCode === -1) {
+                $exitCode = proc_close($process);
+            } else {
+                proc_close($process);
+            }
+
+            if ($exitCode !== 0) {
+                throw new RuntimeException(trim($stderr) !== '' ? trim($stderr) : 'Backup pipeline failed');
+            }
+        } catch (\Throwable $e) {
+            if (is_resource($pipes[2])) {
+                @fclose($pipes[2]);
+            }
+            @proc_close($process);
+            $this->tempRegistry->cleanup();
+            throw $e;
+        }
+
+        // Success — release from cleanup registry
+        $this->tempRegistry->release($outputPath);
+    }
+
+    /**
+     * Fallback for ZIP (not stream-friendly): dump to temp → compress → optional encrypt.
+     */
+    private function backupViaTemp(
+        DatabaseConfig $db,
+        string $dest,
+        string $backend,
+        ?string $encryptionPassword,
+        BackupOptions $backupOptions,
+        ?callable $tickCallback,
+    ): string {
+        $tempBase = TempFileRegistry::resolveTempBase(
+            isset($backupOptions->tempDir) ? $backupOptions->tempDir : null,
+        );
+        $tempSql = $this->createTempFile($tempBase, 'dbtools-dump-');
+        $this->tempRegistry->register($tempSql);
+
+        try {
+            $this->dumpDatabaseToFile($db, $tempSql, $tickCallback);
+            $archivePath = $this->compressSql($tempSql, $dest, $backend, $encryptionPassword, $tickCallback);
+        } finally {
+            $this->tempRegistry->cleanup();
+        }
+
+        return $archivePath;
+    }
+
     private function generateRandomString(): string
     {
-        // Generate a secure random string (like VLSM: openssl rand -base64 32 | tr -d '/+=' | head -c 32)
         $bytes = random_bytes(32);
         return substr(str_replace(['/', '+', '='], '', base64_encode($bytes)), 0, 32);
     }
 
-    private function dumpDatabase(DatabaseConfig $db, string $path, ?callable $tickCallback = null): void
+    /**
+     * @return list<string>
+     */
+    private function buildDumpCommand(DatabaseConfig $db): array
     {
         $cmd = [
             'mysqldump',
@@ -80,13 +224,33 @@ final class BackupService implements BackupServiceInterface
             '--triggers',
             '--events',
             '--add-drop-table',
-            '--result-file=' . $path,
             $db->database,
         ];
 
         if ($db->port) {
             $cmd[] = '--port=' . $db->port;
         }
+
+        return $cmd;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildCompressCommand(string $backend): array
+    {
+        return match ($backend) {
+            ArchiveUtility::BACKEND_ZSTD => ['zstd', '-T0', '-q', '-19'],
+            ArchiveUtility::BACKEND_PIGZ => ['pigz', '-c'],
+            ArchiveUtility::BACKEND_GZIP => ['gzip', '-c'],
+            default => throw new RuntimeException("Unsupported streaming backend: {$backend}"),
+        };
+    }
+
+    private function dumpDatabaseToFile(DatabaseConfig $db, string $path, ?callable $tickCallback = null): void
+    {
+        $cmd = $this->buildDumpCommand($db);
+        $cmd[] = '--result-file=' . $path;
 
         $env = $db->password ? ['MYSQL_PWD' => $db->password] : [];
         $this->runner->run($cmd, $env, $tickCallback);
@@ -112,7 +276,6 @@ final class BackupService implements BackupServiceInterface
     {
         $encryptedPath = $path . '.gpg';
 
-        // Use GPG for symmetric AES-256 encryption (VLSM-compatible)
         $cmd = [
             'gpg', '--batch', '--yes',
             '--passphrase', $password,
@@ -142,7 +305,6 @@ final class BackupService implements BackupServiceInterface
         ];
 
         $metaPath = preg_replace('/\.(zst|gz|zip|gpg)$/', '.meta.json', $archivePath) ?: $archivePath . '.meta.json';
-        // Handle .gpg extension (e.g., .sql.zst.gpg -> .meta.json)
         $metaPath = preg_replace('/\.gpg\.meta\.json$/', '.meta.json', $metaPath) ?: $metaPath;
         @file_put_contents($metaPath, json_encode($meta, JSON_PRETTY_PRINT));
     }
@@ -196,27 +358,27 @@ final class BackupService implements BackupServiceInterface
 
     private function repackZipWithPassword(string $zipPath, string $password): string
     {
-        $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'dbtools-zip-' . bin2hex(random_bytes(4));
-        if (!@mkdir($tempDir, 0777, true) && !is_dir($tempDir)) {
-            throw new RuntimeException("Unable to create temporary directory: {$tempDir}");
+        $tempBase = TempFileRegistry::resolveTempBase();
+        $tempDir = $this->tempRegistry->createTempDir($tempBase, 'dbtools-zip-');
+
+        try {
+            $extracted = ArchiveUtility::decompressToFile($zipPath, $tempDir);
+            @unlink($zipPath);
+
+            $zip = new \ZipArchive();
+            $result = $zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+            if ($result !== true) {
+                throw new RuntimeException("Failed to create password-protected zip: {$zipPath}");
+            }
+
+            $entryName = basename($extracted);
+            $zip->setPassword($password);
+            $zip->addFile($extracted, $entryName);
+            $zip->setEncryptionName($entryName, \ZipArchive::EM_AES_256);
+            $zip->close();
+        } finally {
+            $this->tempRegistry->cleanup();
         }
-
-        $extracted = ArchiveUtility::decompressToFile($zipPath, $tempDir);
-        @unlink($zipPath);
-
-        $zip = new \ZipArchive();
-        $result = $zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
-        if ($result !== true) {
-            throw new RuntimeException("Failed to create password-protected zip: {$zipPath}");
-        }
-
-        $entryName = basename($extracted);
-        $zip->setPassword($password);
-        $zip->addFile($extracted, $entryName);
-        $zip->setEncryptionName($entryName, \ZipArchive::EM_AES_256);
-        $zip->close();
-        @unlink($extracted);
-        @rmdir($tempDir);
 
         return $zipPath;
     }
