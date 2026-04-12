@@ -10,10 +10,14 @@ use RuntimeException;
 
 final class VerifyService implements VerifyServiceInterface
 {
+    private readonly TempFileRegistry $tempRegistry;
+
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
+        ?TempFileRegistry $tempRegistry = null,
     ) {
+        $this->tempRegistry = $tempRegistry ?? new TempFileRegistry();
     }
 
     /**
@@ -79,7 +83,6 @@ final class VerifyService implements VerifyServiceInterface
     {
         $basename = basename($archivePath);
 
-        // Match: name-YYYYMMDD-HHMMSS-RANDOMSTRING (32 alphanumeric chars)
         if (preg_match('/-(\d{8})-(\d{6})-([A-Za-z0-9]{32})/', $basename, $matches)) {
             $randomString = $matches[3];
             return ($dbPassword ?? '') . $randomString;
@@ -90,10 +93,10 @@ final class VerifyService implements VerifyServiceInterface
 
     private function verifyGpgFile(string $target, string $password): void
     {
-        $temp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'dbtools-verify-' . bin2hex(random_bytes(4));
-        @mkdir($temp, 0777, true);
+        $tempBase = TempFileRegistry::resolveTempBase();
+        $tempDir = $this->tempRegistry->createTempDir($tempBase, 'dbtools-verify-');
 
-        $decryptedPath = $temp . DIRECTORY_SEPARATOR . basename($target, '.gpg');
+        $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($target, '.gpg');
 
         try {
             $cmd = [
@@ -105,22 +108,21 @@ final class VerifyService implements VerifyServiceInterface
             ];
             $this->runner->run($cmd);
 
-            // Verify the decrypted archive
             $ok = ArchiveUtility::validateArchive($decryptedPath);
             if (!$ok) {
                 throw new RuntimeException('Archive validation failed after decryption: ' . $target);
             }
         } finally {
-            $this->deleteDir($temp);
+            $this->tempRegistry->cleanup();
         }
     }
 
     private function verifyEncryptedFile(string $target, string $password): void
     {
-        $temp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'dbtools-verify-' . bin2hex(random_bytes(4));
-        @mkdir($temp, 0777, true);
+        $tempBase = TempFileRegistry::resolveTempBase();
+        $tempDir = $this->tempRegistry->createTempDir($tempBase, 'dbtools-verify-');
 
-        $decryptedPath = $temp . DIRECTORY_SEPARATOR . basename($target, '.enc');
+        $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($target, '.enc');
 
         try {
             $cmd = [
@@ -131,13 +133,12 @@ final class VerifyService implements VerifyServiceInterface
             ];
             $this->runner->run($cmd);
 
-            // Verify the decrypted archive
             $ok = ArchiveUtility::validateArchive($decryptedPath);
             if (!$ok) {
                 throw new RuntimeException('Archive validation failed after decryption: ' . $target);
             }
         } finally {
-            $this->deleteDir($temp);
+            $this->tempRegistry->cleanup();
         }
     }
 
@@ -157,34 +158,13 @@ final class VerifyService implements VerifyServiceInterface
 
     private function verifyPasswordProtectedZip(string $target, string $password): void
     {
-        $temp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'dbtools-verify-' . bin2hex(random_bytes(4));
-        @mkdir($temp, 0777, true);
+        $tempBase = TempFileRegistry::resolveTempBase();
+        $tempDir = $this->tempRegistry->createTempDir($tempBase, 'dbtools-verify-');
+
         try {
-            ArchiveUtility::extractPasswordProtectedZip($target, $password, $temp);
+            ArchiveUtility::extractPasswordProtectedZip($target, $password, $tempDir);
         } finally {
-            $this->deleteDir($temp);
+            $this->tempRegistry->cleanup();
         }
-    }
-
-    private function deleteDir(string $dir): void
-    {
-        if (!is_dir($dir)) {
-            return;
-        }
-
-        $items = scandir($dir) ?: [];
-        foreach ($items as $item) {
-            if ($item === '.' || $item === '..') {
-                continue;
-            }
-            $path = $dir . DIRECTORY_SEPARATOR . $item;
-            if (is_dir($path)) {
-                $this->deleteDir($path);
-            } else {
-                @unlink($path);
-            }
-        }
-
-        @rmdir($dir);
     }
 }

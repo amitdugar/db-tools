@@ -35,4 +35,14 @@ interface ProcessRunnerInterface
      * @param callable|null $tickCallback Optional callback called every 100ms while running
      */
     public function runWithFileInput(array $command, array $env, string $filePath, ?callable $tickCallback = null): Process;
+
+    /**
+     * Run a pipeline of commands, piping stdout of each into stdin of the next.
+     * Uses proc_open to connect processes without temp files.
+     *
+     * @param list<list<string>> $commands List of commands to pipe together
+     * @param array<string,string> $env Environment variables for all processes
+     * @param callable|null $tickCallback Optional callback called every 100ms while running
+     */
+    public function runPipeline(array $commands, array $env = [], ?callable $tickCallback = null): void;
 }

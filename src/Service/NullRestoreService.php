@@ -8,7 +8,7 @@ use LogicException;
 
 final class NullRestoreService implements RestoreServiceInterface
 {
-    public function restore(array $options, ?callable $tickCallback = null): void
+    public function restore(array $options, ?callable $tickCallback = null): array
     {
         throw new LogicException('RestoreServiceInterface is not configured. Provide your own implementation that performs restores.');
     }

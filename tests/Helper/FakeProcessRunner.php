@@ -47,6 +47,15 @@ final class FakeProcessRunner implements ProcessRunnerInterface
         return new FakeProcess();
     }
 
+    /** @var list<list<list<string>>> */
+    public array $pipelines = [];
+
+    public function runPipeline(array $commands, array $env = [], ?callable $tickCallback = null): void
+    {
+        $this->pipelines[] = $commands;
+        $this->invocations[] = ['cmd' => ['pipeline:' . count($commands) . '-stages'], 'env' => $env];
+    }
+
     private function extractOption(array $command, string $prefix): ?string
     {
         foreach ($command as $value) {
