@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.0.1
+
+- Release automation: tag pushes now publish to Packagist automatically via CI. No library code changes since 3.0.0.
+
 ## v3.0.0
 
 Breaking: drops support for PHP 8.2 and 8.3, and moves to the Symfony 8 stack.
