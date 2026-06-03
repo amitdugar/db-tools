@@ -21,14 +21,14 @@
         "symfony-console"
     ],
     "require": {
-        "php": "^8.2",
-        "symfony/console": "^7.2",
-        "symfony/process": "^7.3",
+        "php": "^8.4",
+        "symfony/console": "^8.1",
+        "symfony/process": "^8.1",
         "psr/log": "^3.0",
-        "amitdugar/archiveutil": "^1.0"
+        "amitdugar/archiveutil": "^2.0"
     },
     "require-dev": {
-        "phpunit/phpunit": "^11.2"
+        "phpunit/phpunit": "^13.1"
     },
     "autoload": {
         "psr-4": {
@@ -43,5 +43,8 @@
     "bin": [
         "bin/db-tools",
         "bin/console"
-    ]
+    ],
+    "config": {
+        "sort-packages": true
+    }
 }

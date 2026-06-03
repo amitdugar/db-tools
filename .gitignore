@@ -12,3 +12,5 @@ settings.local.json
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
+.vscode/settings.json
+.github/instructions/snyk_rules.instructions.md

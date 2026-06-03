@@ -492,7 +492,7 @@ vendor/bin/db-tools import /path/to/dump.sql.gpg -e mypassword
 
 ## Requirements
 
-- PHP 8.2+
+- PHP 8.4+ (tested on 8.4 and 8.5)
 - `mysqldump`, `mysql` CLI tools
 - Compression: `zstd` (preferred), `pigz`, or `gzip`
 - Encryption: `gpg` (for non-ZIP encrypted backups)

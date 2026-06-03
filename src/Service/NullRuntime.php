@@ -15,6 +15,9 @@ final class NullRuntime implements RuntimeInterface
     private PitrInfoServiceInterface $pitrInfo;
     private PitrRestoreServiceInterface $pitrRestore;
     private BinlogServiceInterface $binlog;
+    private SizeServiceInterface $size;
+    private ImportServiceInterface $import;
+    private MysqlcheckServiceInterface $mysqlcheck;
 
     public function __construct(
         ?BackupServiceInterface $backup = null,
@@ -26,6 +29,9 @@ final class NullRuntime implements RuntimeInterface
         ?PitrInfoServiceInterface $pitrInfo = null,
         ?PitrRestoreServiceInterface $pitrRestore = null,
         ?BinlogServiceInterface $binlog = null,
+        ?SizeServiceInterface $size = null,
+        ?ImportServiceInterface $import = null,
+        ?MysqlcheckServiceInterface $mysqlcheck = null,
     ) {
         $this->backup = $backup ?? new NullBackupService();
         $this->restore = $restore ?? new NullRestoreService();
@@ -36,6 +42,9 @@ final class NullRuntime implements RuntimeInterface
         $this->pitrInfo = $pitrInfo ?? new NullPitrInfoService();
         $this->pitrRestore = $pitrRestore ?? new NullPitrRestoreService();
         $this->binlog = $binlog ?? new NullBinlogService();
+        $this->size = $size ?? new NullSizeService();
+        $this->import = $import ?? new NullImportService();
+        $this->mysqlcheck = $mysqlcheck ?? new NullMysqlcheckService();
     }
 
     public function backupService(): BackupServiceInterface
@@ -81,5 +90,20 @@ final class NullRuntime implements RuntimeInterface
     public function binlogService(): BinlogServiceInterface
     {
         return $this->binlog;
+    }
+
+    public function sizeService(): SizeServiceInterface
+    {
+        return $this->size;
+    }
+
+    public function importService(): ImportServiceInterface
+    {
+        return $this->import;
+    }
+
+    public function mysqlcheckService(): MysqlcheckServiceInterface
+    {
+        return $this->mysqlcheck;
     }
 }
