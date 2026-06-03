@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.0.2
+
+- CI now runs the PHPUnit test suite on PHP 8.4 and 8.5 (previously only validated and linted).
+- Bump `actions/checkout` to v5 (clears the Node 20 deprecation warning). No library code changes.
+
 ## v3.0.1
 
 - Release automation: tag pushes now publish to Packagist automatically via CI. No library code changes since 3.0.0.
