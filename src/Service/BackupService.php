@@ -36,12 +36,23 @@ final class BackupService implements BackupServiceInterface
         $note = $backupOptions->note ? '-' . $this->slug($backupOptions->note) : '';
         $label = $backupOptions->label ?? $db->database;
 
-        // Generate random string for encryption (embedded in filename)
+        // Decide the encryption passphrase and whether a random token is embedded in
+        // the filename. Two schemes, selected by whether the caller gave an explicit
+        // password:
         $randomString = null;
         $encryptionPassword = null;
-        if ($backupOptions->encrypt || $backupOptions->encryptionPassword !== null) {
+        if ($backupOptions->encryptionPassword !== null && $backupOptions->encryptionPassword !== '') {
+            // Explicit/fixed passphrase (e.g. a caller-managed or escrowed key): use it
+            // verbatim. No DB-password derivation and NO random token in the filename —
+            // the archive can only be restored by supplying this same password via
+            // --encryption-password (it is not reconstructable from the file). This is
+            // what makes a backup portable across machines whose DB password differs.
+            $encryptionPassword = $backupOptions->encryptionPassword;
+        } elseif ($backupOptions->encrypt) {
+            // Default scheme (UNCHANGED): DB_PASSWORD + random token, token embedded in
+            // the filename so restore reconstructs the passphrase automatically.
+            // Existing backups and callers relying on the default are unaffected.
             $randomString = $this->generateRandomString();
-            // Password = DB_PASSWORD + randomString (VLSM-compatible)
             $encryptionPassword = ($db->password ?? '') . $randomString;
         }
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.1.0
+
+- Honor an explicit `encryption_password` as a **fixed** backup passphrase. When a password is supplied (via `--encryption-password` or a profile's `encryption_password`), it is now used verbatim and **no random token is embedded in the filename**, so the archive is portable across machines whose database password differs. Restore opens it with the same `--encryption-password`.
+- **Backward compatible:** with no explicit password the default scheme is unchanged — `DB_password` + a random token embedded in the filename, auto-derived on restore. The restore path is unchanged.
+
 ## v3.0.2
 
 - CI now runs the PHPUnit test suite on PHP 8.4 and 8.5 (previously only validated and linted).
