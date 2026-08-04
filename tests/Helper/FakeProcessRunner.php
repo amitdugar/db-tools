@@ -25,14 +25,16 @@ final class FakeProcessRunner implements ProcessRunnerInterface
     {
         $this->invocations[] = ['cmd' => $command, 'env' => $env];
 
-        $first = $command[0] ?? '';
-        if ($first === 'mysqldump') {
+        // BinaryResolver may hand back either the classic or the MariaDB name
+        // depending on what is installed, so match on both.
+        $first = basename((string) ($command[0] ?? ''));
+        if ($first === 'mysqldump' || $first === 'mariadb-dump') {
             $dest = $this->extractOption($command, '--result-file=');
             if ($dest === null) {
                 throw new RuntimeException('FakeProcessRunner: result-file not provided');
             }
             @file_put_contents($dest, "-- SQL DUMP\nCREATE TABLE t (id INT);\n");
-        } elseif ($first === 'mysqlbinlog') {
+        } elseif ($first === 'mysqlbinlog' || $first === 'mariadb-binlog') {
             return new FakeProcess('BINLOG_SQL;');
         }
 

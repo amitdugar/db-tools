@@ -34,7 +34,25 @@ final class RestoreService implements RestoreServiceInterface
         $db = $restoreOptions->database;
         $this->logger?->info('Starting restore', ['archive' => $restoreOptions->archive, 'db' => $db->database]);
 
-        $archiveSize = is_file($restoreOptions->archive) ? (int) filesize($restoreOptions->archive) : 0;
+        // Validate everything needed to open the archive BEFORE anything
+        // destructive happens. recreateDatabase() drops the target database, and
+        // these checks used to sit after it — so a mistyped path or a missing
+        // passphrase dropped the database first and only then reported the
+        // problem, leaving nothing to restore from.
+        $archive = realpath($restoreOptions->archive) ?: $restoreOptions->archive;
+        if (!is_file($archive)) {
+            throw new RuntimeException("Archive not found: {$archive}");
+        }
+
+        $archiveSize = (int) filesize($archive);
+        $ext = strtolower(pathinfo($archive, PATHINFO_EXTENSION));
+        $password = $restoreOptions->encryptionPassword ?? $this->derivePasswordFromFilename($archive, $db->password);
+
+        if (in_array($ext, ['gpg', 'enc'], true) && $password === null) {
+            throw new RuntimeException(
+                'Archive is encrypted; provide --encryption-password or ensure filename contains random string'
+            );
+        }
 
         if (!$restoreOptions->skipSafetyBackup) {
             $this->logger?->info('Creating safety backup');
@@ -56,14 +74,6 @@ final class RestoreService implements RestoreServiceInterface
         if ($tickCallback !== null) {
             $tickCallback();
         }
-
-        $archive = realpath($restoreOptions->archive) ?: $restoreOptions->archive;
-        if (!is_file($archive)) {
-            throw new RuntimeException("Archive not found: {$archive}");
-        }
-
-        $ext = strtolower(pathinfo($archive, PATHINFO_EXTENSION));
-        $password = $restoreOptions->encryptionPassword ?? $this->derivePasswordFromFilename($archive, $db->password);
 
         // Determine if we can stream
         $canStream = $this->canStream($archive, $ext, $password);

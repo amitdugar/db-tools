@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.2.2
+
+Fixes a data-loss bug in `restore`. Recommended for anyone using `--skip-safety-backup`.
+
+### Fixed
+
+- **`restore` dropped the target database before checking that the archive existed.** `recreateDatabase()` issues `DROP DATABASE IF EXISTS` / `CREATE DATABASE`, and the archive validation ran *after* it. A mistyped archive path therefore destroyed the database and only then reported `Archive not found`, leaving nothing to restore from. The same ordering applied to an encrypted archive with no usable passphrase. Both are now validated before anything destructive happens.
+
+  With the default safety backup this was recoverable — a pre-restore archive had already been written. With `--skip-safety-backup` it was not. Verified against a live server: the same command that previously left the target database empty now leaves it untouched.
+
+### Added
+
+- Tests for the destructive paths, which were the thinnest-covered part of the codebase: that the safety backup runs by default and is skipped only when asked; that the `DROP` names the database the caller requested and not the one baked into the archive filename; and that validation precedes it. For PITR: that the recovery target and database filter reach every binlog, that binlogs are applied in order, that meta-file resolution joins the recorded directory, and that explicit binlogs override the meta file.
+
+### Note
+
+- `--pinentry-mode loopback` was considered for `gpg` and deliberately not added. Testing on GnuPG 2.2 and 2.4, headless and with no pinentry program available, showed the existing `--batch --passphrase` symmetric flow works without it.
+
 ## v3.2.1
 
 Fixes `--version` reporting the wrong release, plus bugs surfaced by adding static analysis.
