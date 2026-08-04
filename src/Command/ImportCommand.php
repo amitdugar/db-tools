@@ -80,10 +80,14 @@ final class ImportCommand extends Command
             'encryption_password' => $encryptionPassword,
         ];
 
+        // Started before the try so the catch can always report an elapsed time;
+        // anything thrown above the old assignment left $start undefined and the
+        // failure message reported a nonsense duration.
+        $start = microtime(true);
+
         try {
             $output->writeln(sprintf('Importing <info>%s</info> into <info>%s</info>...', basename($file), $database));
             $output->writeln('');
-            $start = microtime(true);
             $tickCallback = $this->createSpinnerCallback($output, 'Importing', $start);
             $importService->import($options, $tickCallback);
             $this->clearSpinner($output);

@@ -20,8 +20,9 @@ use Symfony\Component\Console\Output\OutputInterface;
 #[AsCommand(name: 'db:test', description: 'Test database connectivity')]
 final class DbTestCommand extends Command
 {
+    // db:test talks to the server through its own runner rather than through a
+    // service, so unlike the other commands it takes no RuntimeInterface.
     public function __construct(
-        private readonly RuntimeInterface $runtime,
         private readonly ?ProfilesConfig $config = null,
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly BinaryResolver $binaries = new BinaryResolver(),

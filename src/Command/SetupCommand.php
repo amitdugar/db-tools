@@ -20,7 +20,8 @@ use Symfony\Component\Console\Question\Question;
 #[AsCommand(name: 'setup', description: 'Interactively configure db-tools for your project')]
 final class SetupCommand extends Command
 {
-    public function __construct(private readonly ?ProfilesConfig $config = null)
+    // setup writes configuration rather than reading it, so it takes none.
+    public function __construct()
     {
         parent::__construct();
     }
@@ -642,8 +643,6 @@ PHP;
     /**
      * Ask a choice question with numeric shortcuts (1, 2, 3...).
      *
-     * @param array<string, string> $choices Key => description mapping
-     * @return string The selected key
      */
     private function createBackupDirectory(string $cwd, OutputInterface $output): void
     {

@@ -130,6 +130,11 @@ final class ImportService implements ImportServiceInterface
         $pipeline = [];
 
         if ($ext === 'gpg') {
+            // A null passphrase would reach proc_open as a command argument.
+            if ($encryptionPassword === null) {
+                throw new RuntimeException('File is encrypted; provide --encryption-password');
+            }
+
             $pipeline[] = [
                 'gpg', '--batch', '--yes',
                 '--passphrase', $encryptionPassword,

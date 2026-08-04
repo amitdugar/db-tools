@@ -92,6 +92,11 @@ final class RestoreCommand extends Command
             'output_dir' => $input->getOption('output-dir') ?: $profile?->outputDir,
         ];
 
+        // Started before the try so the catch can always report an elapsed time;
+        // anything thrown above the old assignment left $start undefined and the
+        // failure message reported a nonsense duration.
+        $start = microtime(true);
+
         try {
             $archiveSize = is_file($archive) ? (int) filesize($archive) : 0;
             $output->writeln(sprintf(
@@ -102,7 +107,6 @@ final class RestoreCommand extends Command
             ));
             $output->writeln('');
 
-            $start = microtime(true);
             $tickCallback = $this->createSpinnerCallback($output, 'Restoring', $start);
             $result = $this->runtime->restoreService()->restore($options, $tickCallback);
             $this->clearSpinner($output);
@@ -181,8 +185,9 @@ final class RestoreCommand extends Command
     {
         if ($this->canUseFzf === null) {
             // Check if fzf command exists
+            // shell_exec returns false on failure as well as null on no output.
             $result = shell_exec('command -v fzf 2>/dev/null');
-            if ($result === null || trim($result) === '') {
+            if (!is_string($result) || trim($result) === '') {
                 $this->canUseFzf = false;
                 return false;
             }

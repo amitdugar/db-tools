@@ -9,23 +9,6 @@ use RuntimeException;
 final class ConfigLoader
 {
     /**
-     * Standard DB_* variable names used by Laravel, Symfony, etc.
-     */
-    private const ENV_MAPPINGS = [
-        'DB_HOST' => 'host',
-        'DB_PORT' => 'port',
-        'DB_DATABASE' => 'database',
-        'DB_USERNAME' => 'user',
-        'DB_PASSWORD' => 'password',
-        // Also check MySQL-style names
-        'MYSQL_HOST' => 'host',
-        'MYSQL_PORT' => 'port',
-        'MYSQL_DATABASE' => 'database',
-        'MYSQL_USER' => 'user',
-        'MYSQL_PASSWORD' => 'password',
-    ];
-
-    /**
      * Load profiles from config files/env.
      */
     public static function load(string $cwd): ProfilesConfig

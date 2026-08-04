@@ -307,7 +307,7 @@ final class CollationService implements CollationServiceInterface
         array_shift($lines); // Skip header
 
         foreach ($lines as $line) {
-            $parts = preg_split('/\t/', $line);
+            $parts = explode("\t", $line);
             if (\count($parts) >= 3) {
                 $tables[] = [
                     'table' => $parts[0] ?? '',
@@ -381,7 +381,7 @@ final class CollationService implements CollationServiceInterface
         array_shift($lines); // Skip header
 
         foreach ($lines as $line) {
-            $parts = preg_split('/\t/', $line);
+            $parts = explode("\t", $line);
             if (\count($parts) >= 6) {
                 $columns[] = [
                     'column' => $parts[0] ?? '',
@@ -432,7 +432,7 @@ final class CollationService implements CollationServiceInterface
         array_shift($lines); // Skip header
 
         foreach ($lines as $line) {
-            $parts = preg_split('/\t/', $line);
+            $parts = explode("\t", $line);
             if (\count($parts) >= 2) {
                 $childTable = $parts[0] ?? '';
                 $parentTable = $parts[1] ?? '';
@@ -552,7 +552,7 @@ final class CollationService implements CollationServiceInterface
         array_shift($lines); // Skip header
 
         foreach ($lines as $line) {
-            $parts = preg_split('/\t/', $line);
+            $parts = explode("\t", $line);
             if (\count($parts) >= 3) {
                 $indexes[] = [
                     'index_name' => $parts[0] ?? '',

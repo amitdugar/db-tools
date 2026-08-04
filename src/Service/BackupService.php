@@ -255,9 +255,9 @@ final class BackupService implements BackupServiceInterface
         BackupOptions $backupOptions,
         ?callable $tickCallback,
     ): string {
-        $tempBase = TempFileRegistry::resolveTempBase(
-            isset($backupOptions->tempDir) ? $backupOptions->tempDir : null,
-        );
+        // BackupOptions has no tempDir — the isset() this replaces referenced a
+        // property that never existed, so it was always false anyway.
+        $tempBase = TempFileRegistry::resolveTempBase(null);
         $tempSql = $this->createTempFile($tempBase, 'dbtools-dump-');
         $this->tempRegistry->register($tempSql);
 

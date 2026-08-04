@@ -1,5 +1,27 @@
 # Changelog
 
+## v3.2.1
+
+Fixes `--version` reporting the wrong release, plus bugs surfaced by adding static analysis.
+
+### Fixed
+
+- **`db-tools --version` reported a stale release.** The version was a hardcoded literal in `ConsoleFactory` that was never bumped, so it still read `3.0.2` after both the 3.1.0 and 3.2.0 releases. Anyone checking on a server whether a fix had landed would have seen an older version than was actually installed and reasonably concluded the deploy had not reached that box. It is now read from Composer via `InstalledVersions`, so it always matches `composer show amitdugar/db-tools` and cannot drift again. A test pins it to that source.
+- `import` and `restore` reported a nonsense duration when a failure occurred early: `$start` was assigned inside the `try`, so anything thrown before it left the variable undefined and the catch block computed elapsed time from nothing.
+- `restore` and `import` could pass a null passphrase to `gpg` as a command argument. Unreachable through the current callers, which check first, but it now fails with a clear message rather than depending on a caller-side invariant.
+- `verify` and `pitr-info` were constructed with a config argument their constructors do not accept. PHP silently discards extra arguments, so this was inert, but it hid the fact that neither command supports profiles.
+- Replaced `preg_split('/\t/', …)` with `explode("\t", …)` in the row parsers. `preg_split` can return `false`, and the results were passed straight to `count()`, which is a fatal in PHP 8.
+- `canUseFzf()` passed `shell_exec`'s result to `trim()` without handling the `false` it returns on failure.
+- Removed dead code: a reference to `BackupOptions::$tempDir`, a property that has never existed, so the `isset()` guarding it was always false; an unused `ENV_MAPPINGS` constant duplicating `.env` handling that already works elsewhere; and a stale docblock on `createBackupDirectory()` documenting a different method's signature.
+
+### Added
+
+- PHPStan at level 8, running in CI on both PHP 8.4 and 8.5. Pre-existing cosmetic findings are captured in `phpstan-baseline.neon` so the build fails on anything new; the bugs listed above were fixed rather than baselined.
+
+### Note
+
+- `DbTestCommand::__construct()` no longer takes a `RuntimeInterface` as its first argument, and `SetupCommand::__construct()` no longer takes a `ProfilesConfig`; neither was used. These are internal command classes wired by `ConsoleFactory`, so this affects nothing that goes through the CLI or the service interfaces — but code constructing `DbTestCommand` directly needs to drop the first argument.
+
 ## v3.2.0
 
 Fixes a silent backup-corruption bug and adds proper MariaDB support. No BC breaks.

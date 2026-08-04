@@ -118,6 +118,14 @@ final class RestoreService implements RestoreServiceInterface
         $pipeline = [];
 
         if ($ext === 'gpg') {
+            // canStream() only returns true for .gpg when a password is known,
+            // so this cannot fire — but a null here would reach proc_open as a
+            // command argument, which is worth failing loudly rather than
+            // relying on a caller-side invariant.
+            if ($password === null) {
+                throw new RuntimeException('Archive is encrypted; provide --encryption-password');
+            }
+
             $pipeline[] = [
                 'gpg', '--batch', '--yes',
                 '--passphrase', $password,

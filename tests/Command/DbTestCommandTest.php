@@ -6,7 +6,6 @@ namespace DbTools\Tests\Command;
 
 use DbTools\Command\DbTestCommand;
 use DbTools\Service\BinaryResolver;
-use DbTools\Service\Runtime;
 use DbTools\Tests\Helper\FakeProcessRunner;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -16,7 +15,7 @@ final class DbTestCommandTest extends TestCase
     private function tester(FakeProcessRunner $runner): CommandTester
     {
         return new CommandTester(
-            new DbTestCommand(new Runtime(), null, $runner, new BinaryResolver(['mysql' => 'mysql']))
+            new DbTestCommand(null, $runner, new BinaryResolver(['mysql' => 'mysql']))
         );
     }
 

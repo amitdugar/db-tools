@@ -1,0 +1,15 @@
+includes:
+    # Pre-existing cosmetic findings — redundant ?? on offsets PHPStan can prove
+    # exist, and missing generics in array docblocks. Nothing in it is a
+    # suspected bug; the real ones it found were fixed rather than baselined.
+    # CI fails on anything NEW, so the list only shrinks.
+    - phpstan-baseline.neon
+
+parameters:
+    level: 8
+    paths:
+        - src
+        - tests
+    # Level 9 currently reports ~350 findings, essentially all of them the
+    # `mixed` flowing through the array<string, mixed> $options API. Raising to
+    # 9 means typing that API properly, which is its own piece of work.

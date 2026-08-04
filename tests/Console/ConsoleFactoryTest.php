@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DbTools\Tests\Console;
 
+use Composer\InstalledVersions;
 use DbTools\Console\ConsoleFactory;
 use DbTools\Service\NullRuntime;
 use PHPUnit\Framework\TestCase;
@@ -73,5 +74,24 @@ final class ConsoleFactoryTest extends TestCase
             $exit = $tester->run(['command' => 'help', 'command_name' => $name]);
             $this->assertSame(0, $exit, "help for '{$name}' failed:\n" . $tester->getDisplay());
         }
+    }
+
+    /**
+     * The version was previously a hardcoded literal and went stale: it still
+     * read 3.0.2 after both the 3.1.0 and 3.2.0 releases, so `db-tools
+     * --version` on a server under-reported what was actually installed. It now
+     * comes from Composer, and this pins it to that source so it cannot drift
+     * back to a literal.
+     */
+    public function testVersionMatchesTheInstalledPackage(): void
+    {
+        $reported = ConsoleFactory::create(new NullRuntime())->getVersion();
+
+        $this->assertNotSame('unknown', $reported, 'Version could not be resolved from Composer');
+        $this->assertSame(
+            InstalledVersions::getPrettyVersion('amitdugar/db-tools'),
+            $reported,
+            'Reported version has drifted from the installed package version'
+        );
     }
 }

@@ -58,7 +58,7 @@ final class SizeService implements SizeServiceInterface
         array_shift($lines);
 
         foreach ($lines as $line) {
-            $parts = preg_split('/\t/', $line);
+            $parts = explode("\t", $line);
             if (\count($parts) >= 4) {
                 $dataSize = (int) ($parts[2] ?? 0);
                 $indexSize = (int) ($parts[3] ?? 0);
