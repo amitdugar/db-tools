@@ -12,6 +12,7 @@ final class SizeService implements SizeServiceInterface
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
     ) {
     }
 
@@ -86,7 +87,7 @@ final class SizeService implements SizeServiceInterface
 
     private function runMysqlQuery(string $host, ?int $port, ?string $user, ?string $password, string $database, string $sql): string
     {
-        $cmd = ['mysql', '--host=' . $host, '--batch'];
+        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host, '--batch'];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;

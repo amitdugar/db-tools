@@ -108,4 +108,59 @@ final class CollationServiceTest extends TestCase
         $this->assertContains('b', $sorted);
         $this->assertContains('c', $sorted);
     }
+
+    private static function options(): array
+    {
+        return ['database' => 'testdb', 'host' => 'localhost', 'user' => 'root'];
+    }
+
+    public function testRecommendsUniversalCollationForMariaDb(): void
+    {
+        $runner = new FakeProcessRunner();
+        // runQuery does not skip column names, so the header precedes the value.
+        $runner->scriptedOutput = ["VERSION()\n11.4.8-MariaDB-log"];
+        $service = new CollationService($runner);
+
+        $this->assertSame('utf8mb4_unicode_ci', $service->getRecommendedCollation(self::options()));
+    }
+
+    public function testRecommendsModernCollationForMysql8(): void
+    {
+        $runner = new FakeProcessRunner();
+        $runner->scriptedOutput = ["VERSION()\n8.0.36"];
+        $service = new CollationService($runner);
+
+        $this->assertSame('utf8mb4_0900_ai_ci', $service->getRecommendedCollation(self::options()));
+    }
+
+    public function testMariaDbIsNotReportedAsMysql8(): void
+    {
+        $runner = new FakeProcessRunner();
+        $runner->scriptedOutput = ["VERSION()\n11.4.8-MariaDB-log"];
+        $service = new CollationService($runner);
+
+        $this->assertFalse($service->isMysql8OrHigher(self::options()));
+    }
+
+    public function testServerVersionIsQueriedOnlyOnce(): void
+    {
+        $runner = new FakeProcessRunner();
+        $runner->scriptedOutput = ["VERSION()\n10.11.6-MariaDB"];
+        $service = new CollationService($runner);
+
+        $service->getRecommendedCollation(self::options());
+        $service->getRecommendedCollation(self::options());
+
+        // A second query would consume the empty queue and parse as 0.0.0.
+        $this->assertSame('MariaDB 10.11.6', $service->serverVersion(self::options())->describe());
+        $this->assertCount(1, $runner->invocations);
+    }
+
+    public function testUnreachableServerDoesNotRecommendVersionSpecificCollation(): void
+    {
+        $runner = new FakeProcessRunner();
+        $service = new CollationService($runner);
+
+        $this->assertSame('utf8mb4_unicode_ci', $service->getRecommendedCollation(self::options()));
+    }
 }

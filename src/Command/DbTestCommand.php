@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace DbTools\Command;
 
 use DbTools\Config\ProfilesConfig;
+use DbTools\Service\BinaryResolver;
+use DbTools\Service\ProcessRunner;
+use DbTools\Service\ProcessRunnerInterface;
 use DbTools\Service\RuntimeInterface;
+use DbTools\Service\ServerVersion;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -16,8 +20,12 @@ use Symfony\Component\Console\Output\OutputInterface;
 #[AsCommand(name: 'db:test', description: 'Test database connectivity')]
 final class DbTestCommand extends Command
 {
-    public function __construct(private readonly RuntimeInterface $runtime, private readonly ?ProfilesConfig $config = null)
-    {
+    public function __construct(
+        private readonly RuntimeInterface $runtime,
+        private readonly ?ProfilesConfig $config = null,
+        private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
+    ) {
         parent::__construct();
     }
 
@@ -69,7 +77,7 @@ final class DbTestCommand extends Command
             );
 
             if ($result['success']) {
-                $version = $result['version'] ?? 'Unknown';
+                $version = $result['flavor'] ?? $result['version'] ?? 'Unknown';
                 $output->writeln(\sprintf('  <info>+</info> Connected (%s)', $version));
             } else {
                 $output->writeln(\sprintf('  <error>-</error> Failed: %s', $result['error'] ?? 'Unknown error'));
@@ -119,6 +127,9 @@ final class DbTestCommand extends Command
             $output->writeln('<info>+</info> Connection successful!');
             $output->writeln('');
 
+            if (isset($result['flavor'])) {
+                $output->writeln(sprintf('  Server:         <comment>%s</comment>', $result['flavor']));
+            }
             if (isset($result['version'])) {
                 $output->writeln(sprintf('  Server version: <comment>%s</comment>', $result['version']));
             }
@@ -139,11 +150,11 @@ final class DbTestCommand extends Command
     }
 
     /**
-     * @return array{success: bool, version?: string, uptime?: int, error?: string}
+     * @return array{success: bool, version?: string, flavor?: string, uptime?: int, error?: string}
      */
     private function testConnection(string $host, ?int $port, ?string $user, ?string $password, ?string $database): array
     {
-        $cmd = ['mysql', '--host=' . $host, '--batch', '--skip-column-names'];
+        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host, '--batch', '--skip-column-names'];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;
@@ -156,45 +167,51 @@ final class DbTestCommand extends Command
         }
 
         $cmd[] = '-e';
-        $cmd[] = "SELECT VERSION(), (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Uptime')";
+        // SHOW GLOBAL STATUS is the one spelling of this that works everywhere.
+        // MariaDB has a performance_schema.global_status table but ships with
+        // performance_schema OFF by default, so the previous query returned
+        // NULL there and db:test silently reported every MariaDB server as
+        // having "0s" uptime rather than erroring.
+        $cmd[] = "SELECT VERSION(); SHOW GLOBAL STATUS LIKE 'Uptime'";
 
         $env = $password !== null ? ['MYSQL_PWD' => $password] : [];
 
         try {
-            $output = $this->runtime->sizeService(); // Use any service that has ProcessRunner
-            // Actually, let's use a direct approach
-            $descriptorSpec = [
-                0 => ['pipe', 'r'],
-                1 => ['pipe', 'w'],
-                2 => ['pipe', 'w'],
-            ];
-
-            $process = proc_open($cmd, $descriptorSpec, $pipes, null, $env);
-            if (!is_resource($process)) {
-                return ['success' => false, 'error' => 'Failed to start mysql process'];
-            }
-
-            fclose($pipes[0]);
-            $stdout = stream_get_contents($pipes[1]);
-            $stderr = stream_get_contents($pipes[2]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-
-            $exitCode = proc_close($process);
-
-            if ($exitCode !== 0) {
-                return ['success' => false, 'error' => trim((string) $stderr)];
-            }
-
-            $parts = preg_split('/\t/', trim((string) $stdout));
-            return [
-                'success' => true,
-                'version' => $parts[0] ?? 'Unknown',
-                'uptime' => isset($parts[1]) ? (int) $parts[1] : null,
-            ];
+            $stdout = $this->runner->runWithInput($cmd, $env, '')->getOutput();
         } catch (\Throwable $e) {
             return ['success' => false, 'error' => $e->getMessage()];
         }
+
+        $lines = [];
+        foreach (explode("\n", trim($stdout)) as $line) {
+            $line = trim($line);
+            if ($line !== '') {
+                $lines[] = $line;
+            }
+        }
+
+        $version = ServerVersion::parse($lines[0] ?? '');
+
+        $uptime = null;
+        foreach ($lines as $line) {
+            if (str_starts_with($line, 'Uptime')) {
+                $parts = explode("\t", $line);
+                $uptime = isset($parts[1]) ? (int) trim($parts[1]) : null;
+                break;
+            }
+        }
+
+        $result = [
+            'success' => true,
+            'version' => $version->raw !== '' ? $version->raw : 'Unknown',
+            'flavor' => $version->describe(),
+        ];
+
+        if ($uptime !== null) {
+            $result['uptime'] = $uptime;
+        }
+
+        return $result;
     }
 
     private function formatUptime(int $seconds): string

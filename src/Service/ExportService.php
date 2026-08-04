@@ -13,6 +13,7 @@ final class ExportService implements ExportServiceInterface
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
     ) {
     }
 
@@ -44,7 +45,7 @@ final class ExportService implements ExportServiceInterface
         $this->logger?->info('Exporting database', ['db' => $db->database, 'output' => $output]);
 
         $cmd = [
-            'mysqldump',
+            $this->binaries->resolve('mysqldump'),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             '--single-transaction',

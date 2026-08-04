@@ -15,6 +15,12 @@ final class FakeProcessRunner implements ProcessRunnerInterface
 
     public ?string $lastImport = null;
 
+    /** @var list<string> Stdout handed to successive runWithInput() calls, FIFO. */
+    public array $scriptedOutput = [];
+
+    /** When set, runWithInput() throws with this message instead of succeeding. */
+    public ?string $failure = null;
+
     public function run(array $command, array $env = [], ?callable $tickCallback = null): Process
     {
         $this->invocations[] = ['cmd' => $command, 'env' => $env];
@@ -37,7 +43,12 @@ final class FakeProcessRunner implements ProcessRunnerInterface
     {
         $this->invocations[] = ['cmd' => $command, 'env' => $env];
         $this->lastImport = $input;
-        return new FakeProcess();
+
+        if ($this->failure !== null) {
+            throw new RuntimeException($this->failure);
+        }
+
+        return new FakeProcess(array_shift($this->scriptedOutput) ?? '');
     }
 
     public function runWithFileInput(array $command, array $env, string $filePath, ?callable $tickCallback = null): Process

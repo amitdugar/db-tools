@@ -19,6 +19,7 @@ final class RestoreService implements RestoreServiceInterface
         private readonly BackupServiceInterface $backupService = new NullBackupService(),
         private readonly ?LoggerInterface $logger = null,
         ?TempFileRegistry $tempRegistry = null,
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
     ) {
         $this->tempRegistry = $tempRegistry ?? new TempFileRegistry();
     }
@@ -153,7 +154,7 @@ final class RestoreService implements RestoreServiceInterface
     private function buildMysqlCommand(DatabaseConfig $db): array
     {
         $cmd = [
-            'mysql',
+            $this->binaries->resolve('mysql'),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             $db->database,
@@ -268,7 +269,7 @@ final class RestoreService implements RestoreServiceInterface
         ];
 
         $cmd = [
-            'mysql',
+            $this->binaries->resolve('mysql'),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             '-e',
@@ -290,7 +291,7 @@ final class RestoreService implements RestoreServiceInterface
         }
 
         $cmd = [
-            'mysql',
+            $this->binaries->resolve('mysql'),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             $db->database,

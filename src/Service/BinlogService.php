@@ -13,6 +13,7 @@ final class BinlogService implements BinlogServiceInterface
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
     ) {
     }
 
@@ -38,7 +39,7 @@ final class BinlogService implements BinlogServiceInterface
 
         $sql = sprintf('PURGE BINARY LOGS BEFORE DATE(NOW() - INTERVAL %d DAY);', $days);
         $cmd = [
-            'mysql',
+            $this->binaries->resolve('mysql'),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             '-e',

@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.2.0
+
+Fixes a silent backup-corruption bug and adds proper MariaDB support. No BC breaks.
+
+### Fixed
+
+- **Backups could silently succeed while producing an incomplete archive.** The dump pipeline was run as a shell string, so its exit status reflected only the last stage. A `mysqldump` that died — bad credentials, server gone, disk full mid-dump — was invisible, because the compressor downstream succeeded on the truncated input and exited 0. The backup was reported as successful and a valid-looking, incomplete archive was written. The pipeline now runs under `pipefail` so a failure in any stage fails the backup. If no pipefail-capable shell is found, a warning is logged.
+- **Every backup and restore failure was masked by an unrelated fatal.** The cleanup paths in `BackupService::runPipelineToFile` and `ProcessRunner::runPipeline` called `proc_close()` on handles they had already closed. `@` does not suppress the resulting `TypeError`, so the real error — bad credentials, a `gpg` failure, a missing file — was replaced by an uncaught fatal and a stack trace. Notably this made `--encryption-password` appear broken when `gpg` failed for environmental reasons: no archive, no usable error.
+- `backup` now creates its output directory if missing, matching `export`. Previously a non-existent `--output-dir` failed with an error naming neither the directory nor the cause.
+- `collation` no longer picks `utf8mb4_0900_ai_ci` for MariaDB. The old check was `version_compare(VERSION(), '8.0.0', '>=')`, which is true for MariaDB 10.x and 11.x, but only MariaDB 11.4+ knows that collation — on 10.5, 10.6 and 10.11 every `ALTER` aborted with `ERROR 1273 Unknown collation`.
+- `db:test` reported every MariaDB server as having `0s` uptime. It read `performance_schema.global_status`, and MariaDB ships with `performance_schema` off, so the value came back `NULL`. It now uses `SHOW GLOBAL STATUS`, which works on both.
+- `db:test` no longer bypasses `ProcessRunner` with a raw `proc_open`, and drops a dead `sizeService()` call.
+
+### Added
+
+- MariaDB is now detected from `VERSION()` rather than inferred from the version number, including the `5.5.5-` compatibility prefix that MariaDB 10.x reports for old clients. `db:test` shows the detected server, and `collation` picks its default accordingly.
+- Client binaries resolve automatically between the classic and MariaDB names (`mysqldump` / `mariadb-dump`, and so on), since MariaDB 11.0 renamed them and deprecated the `mysql*` symlinks. Override any of them with `DBTOOLS_MYSQL_BIN`, `DBTOOLS_MYSQLDUMP_BIN`, `DBTOOLS_MYSQLBINLOG_BIN` or `DBTOOLS_MYSQLCHECK_BIN`.
+- `CollationService::serverVersion()` exposes the detected flavour and version. Deliberately **not** added to `CollationServiceInterface`, so third-party implementations keep working.
+
+### Notes
+
+- `CollationServiceInterface::isMysql8OrHigher()` is unchanged in signature and now returns `false` for MariaDB. Marked `@deprecated` in favour of `serverVersion()`.
+- A MySQL 8.4 client cannot authenticate against a MariaDB server at all — they no longer share an auth plugin. Use the MariaDB client; the fallback above picks it up when installed.
+
 ## v3.1.0
 
 - Honor an explicit `encryption_password` as a **fixed** backup passphrase. When a password is supplied (via `--encryption-password` or a profile's `encryption_password`), it is now used verbatim and **no random token is embedded in the filename**, so the archive is portable across machines whose database password differs. Restore opens it with the same `--encryption-password`.

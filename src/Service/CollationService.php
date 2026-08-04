@@ -9,13 +9,15 @@ use RuntimeException;
 
 final class CollationService implements CollationServiceInterface
 {
-    private const MYSQL8_COLLATION = 'utf8mb4_0900_ai_ci';
-    private const MYSQL5_COLLATION = 'utf8mb4_unicode_ci';
     private const CHARSET = 'utf8mb4';
+
+    /** Cached per options-signature so a conversion run does not re-query on every table. */
+    private ?ServerVersion $serverVersion = null;
 
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
     ) {
     }
 
@@ -603,16 +605,38 @@ final class CollationService implements CollationServiceInterface
     /**
      * @param array<string, mixed> $options
      */
-    public function isMysql8OrHigher(array $options): bool
+    public function serverVersion(array $options): ServerVersion
     {
+        if ($this->serverVersion !== null) {
+            return $this->serverVersion;
+        }
+
         try {
             $output = $this->runQuery($options, 'SELECT VERSION()');
             $lines = explode("\n", trim($output));
-            $version = $lines[1] ?? '';
-            return version_compare($version, '8.0.0', '>=');
+            // runQuery does not pass --skip-column-names, so line 0 is the header.
+            $raw = trim($lines[1] ?? '');
         } catch (RuntimeException) {
-            return false;
+            // Unreachable server: fall back to the collation that exists
+            // everywhere rather than guessing a version-specific one.
+            $raw = '';
         }
+
+        return $this->serverVersion = ServerVersion::parse($raw);
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     *
+     * @deprecated Use serverVersion() instead. This returns true for MariaDB 10+
+     *             and 11+, whose version numbers exceed 8 but which support none
+     *             of the MySQL 8 collations.
+     */
+    public function isMysql8OrHigher(array $options): bool
+    {
+        $version = $this->serverVersion($options);
+
+        return !$version->isMariaDb() && $version->isAtLeast('8.0.0');
     }
 
     /**
@@ -620,7 +644,7 @@ final class CollationService implements CollationServiceInterface
      */
     public function getRecommendedCollation(array $options): string
     {
-        return $this->isMysql8OrHigher($options) ? self::MYSQL8_COLLATION : self::MYSQL5_COLLATION;
+        return $this->serverVersion($options)->recommendedCollation();
     }
 
     /**
@@ -691,7 +715,7 @@ final class CollationService implements CollationServiceInterface
         $password = isset($options['password']) ? (string) $options['password'] : null;
         $database = isset($options['database']) ? (string) $options['database'] : null;
 
-        $cmd = ['mysql', '--host=' . $host, '--batch'];
+        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host, '--batch'];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;

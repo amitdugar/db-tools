@@ -18,6 +18,7 @@ final class BackupService implements BackupServiceInterface
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
         ?TempFileRegistry $tempRegistry = null,
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
     ) {
         $this->tempRegistry = $tempRegistry ?? new TempFileRegistry();
     }
@@ -62,6 +63,12 @@ final class BackupService implements BackupServiceInterface
             : sprintf('%s-%s%s.sql', $label, $timestamp, $note);
 
         $dest = rtrim($backupOptions->outputDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $destBase;
+
+        // Create it up front so both the streaming and the ZIP path, and the
+        // metadata written alongside them, land somewhere that exists. Without
+        // this the shell redirect fails and the backup dies with an error that
+        // names neither the directory nor the cause.
+        $this->ensureDirectory(dirname($dest));
 
         $backend = $backupOptions->compressionBackend ?? ArchiveUtility::pickBestBackend();
 
@@ -140,13 +147,16 @@ final class BackupService implements BackupServiceInterface
         // Register output for cleanup in case of failure
         $this->tempRegistry->register($outputPath);
 
-        $process = proc_open($shell, $descriptors, $pipes, null, $fullEnv);
+        $process = proc_open($this->pipefailCommand($shell), $descriptors, $pipes, null, $fullEnv);
         if (!is_resource($process)) {
+            $this->tempRegistry->cleanup();
             throw new RuntimeException('Failed to start pipeline');
         }
 
         fclose($pipes[0]); // close stdin
         fclose($pipes[1]); // we redirect stdout to file via shell
+
+        $closed = false;
 
         try {
             $running = true;
@@ -162,12 +172,16 @@ final class BackupService implements BackupServiceInterface
             $stderr = stream_get_contents($pipes[2]) ?: '';
             fclose($pipes[2]);
 
+            // proc_get_status only reports the real code on the first call after
+            // the process exits; the polling loop above has already consumed it,
+            // so proc_close is what carries the status here.
             $status = proc_get_status($process);
             $exitCode = $status['exitcode'];
+            $closeCode = proc_close($process);
+            $closed = true;
+
             if ($exitCode === -1) {
-                $exitCode = proc_close($process);
-            } else {
-                proc_close($process);
+                $exitCode = $closeCode;
             }
 
             if ($exitCode !== 0) {
@@ -177,13 +191,57 @@ final class BackupService implements BackupServiceInterface
             if (is_resource($pipes[2])) {
                 @fclose($pipes[2]);
             }
-            @proc_close($process);
+            // Only if we did not already close it: proc_close on a closed handle
+            // raises a TypeError, which @ does not suppress, and that would
+            // replace the real failure with an unrelated fatal.
+            if (!$closed) {
+                @proc_close($process);
+            }
             $this->tempRegistry->cleanup();
             throw $e;
         }
 
         // Success — release from cleanup registry
         $this->tempRegistry->release($outputPath);
+    }
+
+    /**
+     * Wrap the pipeline so a failure in any stage fails the whole thing.
+     *
+     * A shell pipeline reports only its LAST stage's status. Without pipefail a
+     * mysqldump that dies — bad credentials, server gone, disk full mid-dump —
+     * is invisible, because the compressor downstream happily succeeds on the
+     * truncated input and exits 0. The backup is then reported as successful
+     * and a valid-looking but incomplete archive is written, which is the worst
+     * possible failure mode for a backup tool.
+     *
+     * pipefail is not in POSIX sh, and /bin/sh is dash on Debian and Ubuntu, so
+     * this needs a shell known to support it.
+     *
+     * @return list<string>|string
+     */
+    private function pipefailCommand(string $shell): array|string
+    {
+        foreach (['/bin/bash', '/usr/bin/bash', '/bin/zsh'] as $candidate) {
+            if (is_executable($candidate)) {
+                return [$candidate, '-o', 'pipefail', '-c', $shell];
+            }
+        }
+
+        $this->logger?->warning(
+            'No pipefail-capable shell found; a failure in an early pipeline stage may go undetected.'
+        );
+
+        return $shell;
+    }
+
+    private function ensureDirectory(string $dir): void
+    {
+        // The extra is_dir() guard covers a concurrent backup creating it between
+        // the check and the mkdir.
+        if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
+            throw new RuntimeException("Unable to create output directory: {$dir}");
+        }
     }
 
     /**
@@ -225,7 +283,7 @@ final class BackupService implements BackupServiceInterface
     private function buildDumpCommand(DatabaseConfig $db): array
     {
         $cmd = [
-            'mysqldump',
+            $this->binaries->resolve('mysqldump'),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             '--single-transaction',

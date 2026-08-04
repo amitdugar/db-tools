@@ -16,6 +16,7 @@ final class ImportService implements ImportServiceInterface
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
         ?TempFileRegistry $tempRegistry = null,
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
     ) {
         $this->tempRegistry = $tempRegistry ?? new TempFileRegistry();
     }
@@ -163,7 +164,7 @@ final class ImportService implements ImportServiceInterface
      */
     private function buildMysqlCommand(string $host, ?int $port, ?string $user, string $database): array
     {
-        $cmd = ['mysql', '--host=' . $host];
+        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;
@@ -247,7 +248,7 @@ final class ImportService implements ImportServiceInterface
             throw new RuntimeException("SQL file not found: {$sqlPath}");
         }
 
-        $cmd = ['mysql', '--host=' . $host];
+        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;

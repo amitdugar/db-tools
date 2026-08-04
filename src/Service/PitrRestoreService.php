@@ -13,6 +13,7 @@ final class PitrRestoreService implements PitrRestoreServiceInterface
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
     ) {
     }
 
@@ -45,7 +46,7 @@ final class PitrRestoreService implements PitrRestoreServiceInterface
 
         foreach ($binlogs as $binlog) {
             $cmd = [
-                'mysqlbinlog',
+                $this->binaries->resolve('mysqlbinlog'),
                 '--stop-datetime=' . $to,
                 $binlog,
             ];
@@ -59,7 +60,7 @@ final class PitrRestoreService implements PitrRestoreServiceInterface
             $binlogOutput = $this->runner->run($cmd)->getOutput();
 
             $mysqlCmd = [
-                'mysql',
+                $this->binaries->resolve('mysql'),
                 '--host=' . $db->host,
                 '--user=' . ($db->user ?? ''),
                 $db->database,

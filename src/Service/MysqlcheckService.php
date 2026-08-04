@@ -12,6 +12,7 @@ final class MysqlcheckService implements MysqlcheckServiceInterface
     public function __construct(
         private readonly ProcessRunnerInterface $runner = new ProcessRunner(),
         private readonly ?LoggerInterface $logger = null,
+        private readonly BinaryResolver $binaries = new BinaryResolver(),
     ) {
     }
 
@@ -71,7 +72,7 @@ final class MysqlcheckService implements MysqlcheckServiceInterface
         $operation = $extraArgs[0] ?? '--check';
         $this->logger?->info('Running mysqlcheck', ['database' => $database, 'operation' => $operation]);
 
-        $cmd = ['mysqlcheck', '--host=' . $host];
+        $cmd = [$this->binaries->resolve('mysqlcheck'), '--host=' . $host];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;

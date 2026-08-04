@@ -112,6 +112,8 @@ final class ProcessRunner implements ProcessRunnerInterface
         $processes = [];
         /** @var list<array{0:resource,1:resource,2:resource}> $pipes */
         $pipes = [];
+        /** @var array<int,true> $closed Stage indexes whose handle proc_close already took. */
+        $closed = [];
 
         try {
             $prevReadPipe = null;
@@ -187,10 +189,11 @@ final class ProcessRunner implements ProcessRunnerInterface
 
                 // proc_get_status only returns the real exit code on the first call
                 // after the process exits. If it returns -1, use proc_close.
+                $closeCode = proc_close($proc);
+                $closed[$i] = true;
+
                 if ($exitCode === -1) {
-                    $exitCode = proc_close($proc);
-                } else {
-                    proc_close($proc);
+                    $exitCode = $closeCode;
                 }
 
                 if ($exitCode !== 0) {
@@ -201,17 +204,25 @@ final class ProcessRunner implements ProcessRunnerInterface
                 }
             }
         } catch (\Throwable $e) {
-            // Kill any still-running processes
+            // Kill any still-running processes. Stages before the failing one
+            // have already been closed above; touching those handles again
+            // raises a TypeError that @ does not suppress, which would replace
+            // the real pipeline error with an unrelated fatal.
             foreach ($processes as $i => $proc) {
-                $status = @proc_get_status($proc);
-                if ($status && $status['running']) {
-                    @proc_terminate($proc, 9);
-                }
-                // Close any open pipes
+                // Close any open pipes regardless — they are separate resources.
                 foreach (($pipes[$i] ?? []) as $pipe) {
                     if (is_resource($pipe)) {
                         @fclose($pipe);
                     }
+                }
+
+                if (isset($closed[$i])) {
+                    continue;
+                }
+
+                $status = @proc_get_status($proc);
+                if ($status && $status['running']) {
+                    @proc_terminate($proc, 9);
                 }
                 @proc_close($proc);
             }

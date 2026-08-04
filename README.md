@@ -380,6 +380,31 @@ vendor/bin/db-tools backup --host=otherhost --database=otherdb
 DBTOOLS_HOST=otherhost DBTOOLS_DATABASE=otherdb vendor/bin/db-tools backup
 ```
 
+## MySQL and MariaDB
+
+Both are supported. Two things adapt automatically:
+
+**Client binaries.** MariaDB 11.0 renamed its client tools (`mysql` → `mariadb`,
+`mysqldump` → `mariadb-dump`, and so on) and deprecated the old `mysql*`
+symlinks. db-tools looks for the classic name first and falls back to the
+MariaDB name, so it works on either install without configuration. Override any
+of them if your tools live somewhere unusual:
+
+```bash
+DBTOOLS_MYSQL_BIN=/opt/mariadb/bin/mariadb
+DBTOOLS_MYSQLDUMP_BIN=/opt/mariadb/bin/mariadb-dump
+DBTOOLS_MYSQLBINLOG_BIN=/opt/mariadb/bin/mariadb-binlog
+DBTOOLS_MYSQLCHECK_BIN=/opt/mariadb/bin/mariadb-check
+```
+
+**Server flavour.** `db:test` reports which server it reached, and the
+`collation` command picks its default collation accordingly — see
+[Collation Conversion](#collation-conversion).
+
+> Note: a MySQL 8.4 client cannot authenticate against a MariaDB server at all
+> (they no longer share an auth plugin). Use the MariaDB client for MariaDB
+> servers; the fallback above picks it up automatically when it is installed.
+
 ## Encrypted Backups
 
 All compression backends support encryption using GPG with AES-256. There are two ways to encrypt:
@@ -436,10 +461,19 @@ return [
 
 ## Collation Conversion
 
-The `collation` command converts database tables and columns to utf8mb4 with automatic MySQL version detection:
+The `collation` command converts database tables and columns to utf8mb4, picking
+the default collation from the detected server flavour and version:
 
 - **MySQL 8+**: Uses `utf8mb4_0900_ai_ci`
-- **MySQL 5.x/MariaDB**: Uses `utf8mb4_unicode_ci`
+- **MySQL 5.x**: Uses `utf8mb4_unicode_ci`
+- **MariaDB (all versions)**: Uses `utf8mb4_unicode_ci`
+
+MariaDB is detected from `VERSION()` rather than inferred from the version
+number, because MariaDB 10.x and 11.x both compare greater than 8.0 while only
+MariaDB 11.4+ recognises `utf8mb4_0900_ai_ci` — on 10.5/10.6/10.11 it fails with
+`ERROR 1273 Unknown collation`. MariaDB's own `utf8mb4_uca1400_ai_ci` (10.10+)
+is not selected automatically, since adopting it changes sort order; pass
+`--collation utf8mb4_uca1400_ai_ci` if you want it.
 
 ```bash
 # Preview what would be converted (no changes)
