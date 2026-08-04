@@ -1,9 +1,0 @@
-syntax: glob
-.DS_Store
-vendor/
-composer.lock
-node_modules/
-*.log
-*.cache
-._*
-settings.local.json

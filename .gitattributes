@@ -12,11 +12,3 @@
 /phpstan-baseline.neon export-ignore
 /.gitattributes     export-ignore
 /.gitignore         export-ignore
-
-# Mercurial leftovers from before the move to git, tracked since the initial
-# commit and shipped ever since. Kept in the repository rather than deleted:
-# .hgtags is the only surviving record of the pre-1.0 releases (0.0.1–0.2.1),
-# which exist as no git tag and whose commits are not in this history.
-/.hgignore          export-ignore
-/.hgtags            export-ignore
-/.keep              export-ignore
