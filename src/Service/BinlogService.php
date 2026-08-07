@@ -39,7 +39,7 @@ final class BinlogService implements BinlogServiceInterface
 
         $sql = sprintf('PURGE BINARY LOGS BEFORE DATE(NOW() - INTERVAL %d DAY);', $days);
         $cmd = [
-            $this->binaries->resolve('mysql'),
+            ...$this->binaries->client('mysql', $db->password),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             '-e',

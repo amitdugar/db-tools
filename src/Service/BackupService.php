@@ -296,7 +296,7 @@ final class BackupService implements BackupServiceInterface
     private function buildDumpCommand(DatabaseConfig $db): array
     {
         $cmd = [
-            $this->binaries->resolve('mysqldump'),
+            ...$this->binaries->client('mysqldump', $db->password),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             '--single-transaction',

@@ -87,7 +87,7 @@ final class SizeService implements SizeServiceInterface
 
     private function runMysqlQuery(string $host, ?int $port, ?string $user, ?string $password, string $database, string $sql): string
     {
-        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host, '--batch'];
+        $cmd = [...$this->binaries->client('mysql', $password), '--host=' . $host, '--batch'];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;

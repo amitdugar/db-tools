@@ -146,7 +146,7 @@ final class ImportService implements ImportServiceInterface
         }
 
         $pipeline[] = $this->buildDecompressCommand($innerExt, $ext === 'gpg' ? null : $file);
-        $pipeline[] = $this->buildMysqlCommand($host, $port, $user, $database);
+        $pipeline[] = $this->buildMysqlCommand($host, $port, $user, $dbPassword, $database);
 
         $env = $dbPassword !== null ? ['MYSQL_PWD' => $dbPassword] : [];
         $this->runner->runPipeline($pipeline, $env, $tickCallback);
@@ -167,9 +167,9 @@ final class ImportService implements ImportServiceInterface
     /**
      * @return list<string>
      */
-    private function buildMysqlCommand(string $host, ?int $port, ?string $user, string $database): array
+    private function buildMysqlCommand(string $host, ?int $port, ?string $user, ?string $password, string $database): array
     {
-        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host];
+        $cmd = [...$this->binaries->client('mysql', $password), '--host=' . $host];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;
@@ -253,7 +253,7 @@ final class ImportService implements ImportServiceInterface
             throw new RuntimeException("SQL file not found: {$sqlPath}");
         }
 
-        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host];
+        $cmd = [...$this->binaries->client('mysql', $password), '--host=' . $host];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;

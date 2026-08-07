@@ -72,7 +72,7 @@ final class MysqlcheckService implements MysqlcheckServiceInterface
         $operation = $extraArgs[0] ?? '--check';
         $this->logger?->info('Running mysqlcheck', ['database' => $database, 'operation' => $operation]);
 
-        $cmd = [$this->binaries->resolve('mysqlcheck'), '--host=' . $host];
+        $cmd = [...$this->binaries->client('mysqlcheck', $password), '--host=' . $host];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;

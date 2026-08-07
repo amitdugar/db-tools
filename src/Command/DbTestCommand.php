@@ -155,7 +155,7 @@ final class DbTestCommand extends Command
      */
     private function testConnection(string $host, ?int $port, ?string $user, ?string $password, ?string $database): array
     {
-        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host, '--batch', '--skip-column-names'];
+        $cmd = [...$this->binaries->client('mysql', $password), '--host=' . $host, '--batch', '--skip-column-names'];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;

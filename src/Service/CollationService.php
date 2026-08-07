@@ -715,7 +715,7 @@ final class CollationService implements CollationServiceInterface
         $password = isset($options['password']) ? (string) $options['password'] : null;
         $database = isset($options['database']) ? (string) $options['database'] : null;
 
-        $cmd = [$this->binaries->resolve('mysql'), '--host=' . $host, '--batch'];
+        $cmd = [...$this->binaries->client('mysql', $password), '--host=' . $host, '--batch'];
 
         if ($port !== null) {
             $cmd[] = '--port=' . $port;

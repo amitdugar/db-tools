@@ -60,7 +60,7 @@ final class PitrRestoreService implements PitrRestoreServiceInterface
             $binlogOutput = $this->runner->run($cmd)->getOutput();
 
             $mysqlCmd = [
-                $this->binaries->resolve('mysql'),
+                ...$this->binaries->client('mysql', $db->password),
                 '--host=' . $db->host,
                 '--user=' . ($db->user ?? ''),
                 $db->database,

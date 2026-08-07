@@ -52,6 +52,64 @@ final class BinaryResolver
         return $this->cache[$tool] ??= $this->lookUp($tool);
     }
 
+    /**
+     * The binary, plus the flag that stops a host option file overriding us.
+     *
+     * MySQL's client tools read ~/.my.cnf, /etc/my.cnf and the rest before
+     * they look at anything we pass, and the precedence between the three ways
+     * of supplying a password is COMMAND LINE > OPTION FILE > ENVIRONMENT.
+     * This tool puts the user on the command line and the password in
+     * MYSQL_PWD, which is the right place for it — it stays out of `ps` — and
+     * also the weakest of the three. A machine with credentials in ~/.my.cnf
+     * therefore connects as the user we asked for with a password we did not,
+     * and the command fails on access denied.
+     *
+     * That failure used to be invisible for backups: a shell pipeline reports
+     * only its last stage, so `mysqldump | zstd > archive` wrote a valid
+     * archive of nothing and exited 0. v3.2.3 fixed the reporting. This fixes
+     * the cause.
+     *
+     * ONLY WHEN THERE IS A PASSWORD OF OUR OWN TO ASSERT. Passing
+     * --no-defaults unconditionally would break the setup where an option file
+     * is the intended source of credentials and the caller deliberately
+     * configured none — socket authentication, or a ~/.my.cnf the operator
+     * maintains on purpose. Nothing is overriding us there, so there is
+     * nothing to stop.
+     *
+     * The flag has to come first. MySQL ignores --no-defaults in any other
+     * position and says nothing, which is why this returns the binary with it
+     * attached rather than leaving a caller to order the two correctly.
+     *
+     * ONE THING IS LOST WITH IT, and it is worth naming because it is not
+     * credentials. An option file may also carry tuning — max_allowed_packet,
+     * default-character-set, net_buffer_length — and --no-defaults drops those
+     * too. A host that needs them can set DBTOOLS_ALLOW_HOST_DEFAULTS=1 and
+     * get the old behaviour back, credentials included. That is an informed
+     * choice rather than a default, because the failure it re-enables is the
+     * silent one this exists to stop.
+     *
+     * @param  string       $tool     One of the keys of self::CANDIDATES.
+     * @param  string|null  $password What the caller will put in MYSQL_PWD.
+     * @return list<string>
+     */
+    public function client(string $tool, ?string $password): array
+    {
+        $binary = $this->resolve($tool);
+
+        if ($password === null || $password === '' || $this->hostDefaultsAllowed()) {
+            return [$binary];
+        }
+
+        return [$binary, '--no-defaults'];
+    }
+
+    private function hostDefaultsAllowed(): bool
+    {
+        $flag = getenv('DBTOOLS_ALLOW_HOST_DEFAULTS');
+
+        return $flag !== false && !in_array(strtolower(trim($flag)), ['', '0', 'false', 'no'], true);
+    }
+
     private function lookUp(string $tool): string
     {
         if (isset($this->overrides[$tool]) && $this->overrides[$tool] !== '') {

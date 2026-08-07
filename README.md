@@ -405,6 +405,31 @@ DBTOOLS_MYSQLCHECK_BIN=/opt/mariadb/bin/mariadb-check
 > (they no longer share an auth plugin). Use the MariaDB client for MariaDB
 > servers; the fallback above picks it up automatically when it is installed.
 
+## Host option files
+
+When you configure a password, db-tools passes `--no-defaults` to the client
+tools so that `~/.my.cnf` and `/etc/my.cnf` cannot override the credentials you
+gave it.
+
+Without it, a password in an option file silently wins. MySQL ranks option
+files above environment variables, and `MYSQL_PWD` is where a password belongs
+because it stays out of `ps`. The connection is then attempted with the user
+you configured and a password you did not, and it is refused.
+
+Configure no password and nothing changes. Option files are still read, which
+is what socket authentication and operator-maintained `~/.my.cnf` setups
+depend on.
+
+`--no-defaults` also drops non-credential tuning such as `max_allowed_packet`
+and `default-character-set`. If your option file carries settings you need:
+
+```bash
+DBTOOLS_ALLOW_HOST_DEFAULTS=1 vendor/bin/db-tools backup
+```
+
+That reads option files as before, credentials included, so use it only where
+the option file is the intended source.
+
 ## Encrypted Backups
 
 All compression backends support encryption using GPG with AES-256. There are two ways to encrypt:

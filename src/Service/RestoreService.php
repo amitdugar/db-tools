@@ -172,7 +172,7 @@ final class RestoreService implements RestoreServiceInterface
     private function buildMysqlCommand(DatabaseConfig $db): array
     {
         $cmd = [
-            $this->binaries->resolve('mysql'),
+            ...$this->binaries->client('mysql', $db->password),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             $db->database,
@@ -287,7 +287,7 @@ final class RestoreService implements RestoreServiceInterface
         ];
 
         $cmd = [
-            $this->binaries->resolve('mysql'),
+            ...$this->binaries->client('mysql', $db->password),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             '-e',
@@ -309,7 +309,7 @@ final class RestoreService implements RestoreServiceInterface
         }
 
         $cmd = [
-            $this->binaries->resolve('mysql'),
+            ...$this->binaries->client('mysql', $db->password),
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             $db->database,

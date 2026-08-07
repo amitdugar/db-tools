@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.3.0
+
+Stops a host option file overriding the credentials you configured. Recommended for anyone whose machines carry a `~/.my.cnf`.
+
+### Fixed
+
+- **A password in `~/.my.cnf` silently beat the one db-tools was given, and the backup that failed as a result reported success.** MySQL's client tools read option files before anything passed to them, and the precedence between the three ways to supply a password is command line > option file > environment. This tool puts the user on the command line and the password in `MYSQL_PWD` — the right place for it, since it stays out of `ps`, and also the weakest of the three. On a machine with credentials in an option file the connection was therefore attempted with the configured user and somebody else's password, and refused.
+
+  The symptom was a 13-byte archive and `Backup created`. v3.2.3 fixed the reporting half of that, so the failure is now visible; this fixes the cause. Every command that shells out to `mysql`, `mysqldump` or `mysqlcheck` now passes `--no-defaults`, which has to be the first argument or MySQL ignores it without saying so.
+
+  **Only when a password is configured.** Passing it unconditionally would break the case where an option file is the intended source of credentials and none was configured on purpose — socket authentication, or a `~/.my.cnf` an operator maintains. Nothing is being overridden there, so nothing is stopped. `mysqlbinlog` is untouched: it reads local files here and never authenticates.
+
+### Added
+
+- `DBTOOLS_ALLOW_HOST_DEFAULTS=1` reads option files as before. `--no-defaults` also drops non-credential tuning such as `max_allowed_packet` and `default-character-set`, and a host that keeps those in an option file needs a way back. It re-enables the credential clash above, so it is an informed choice rather than a default.
+- Tests pinning both directions — the flag appears with a password and stays away without one — its position, the escape hatch including the values that do not open it, and that the dump command itself carries it. The last of those is the one that matters: a helper that is correct and one command builder still bypassing it would pass every other test and fix nothing.
+
 ## v3.2.3
 
 Fixes a deadlock that made streaming `import` and `restore` hang forever instead of reporting why they failed. Recommended for everyone.
