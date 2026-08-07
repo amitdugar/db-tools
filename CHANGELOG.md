@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.2.3
+
+Fixes a deadlock that made streaming `import` and `restore` hang forever instead of reporting why they failed. Recommended for everyone.
+
+### Fixed
+
+- **A failing pipeline stage could hang the whole command indefinitely, swallowing the error that caused it.** `runPipeline()` handed each intermediate pipe's read end to the next stage as its stdin but never closed its own copy. The kernel therefore still counted a reader on that pipe, so when the final `mysql` stage exited early — bad credentials, refused connection, wrong database — the upstream `zstd` never received `EPIPE`. It blocked on a full 64KB buffer, `gpg` blocked behind it, and the poll loop spun forever. Meanwhile `mysql`'s error sat undrained in a pipe that was only read *after* every process had exited, which now never happened.
+
+  The reported symptom was `import` of a `.sql.zst.gpg` archive running 55 minutes on Ubuntu, creating zero tables, printing nothing beyond the progress spinner, and having to be killed. The archive was fine and the error was real — the tool discarded it. The same command now fails in under a second with the stage's own message, for example `Pipeline failed at stage 2 (mysql --host=…): ERROR 1045: Access denied`.
+
+- **Pipeline output was collected only after all stages exited, so any stage noisy enough to fill a pipe buffer deadlocked.** A pipe holds roughly 64KB; a stage that writes more than that to stderr blocks on the write until something reads. Both `runPipeline()` and the backup path's `runPipelineToFile()` read only once every stage had finished, which for such a stage could not happen. Both now drain stdout and stderr non-blockingly inside the poll loop. Retention is capped per stage, but draining continues past the cap, and each pass is bounded so one loud stage cannot starve the others or stall the progress spinner.
+
+- **The reported failure named the wrong stage.** When a stage died, every stage upstream took `SIGPIPE` on its next write, and the exit-code check threw on the first failing stage by index — surfacing `Broken pipe` from `gpg` while burying the reason the pipeline actually stopped. Failures that are merely collateral from a downstream death are now dropped whenever a stage failed on its own terms, and the message names the stage it came from.
+
+- **`gpg`'s passphrase could reach the console and the logs.** The fallback error message rendered the failing stage's full argument list, which for a decrypt or encrypt stage includes `--passphrase` and the archive's key. The value is now redacted.
+
+### Added
+
+- Regression tests for each deadlock: a last stage that fails immediately while an upstream stage still has megabytes to write, a stage flooding stderr past the buffer, and a final stage flooding stdout that nothing consumes. Each runs the pipeline in a child process under a hard timeout, so a regression fails the build rather than hanging CI forever. Also a test that a failing stage's description cannot leak the passphrase.
+
+### Note
+
+- The `--pinentry-mode loopback` question was revisited and the v3.2.2 conclusion holds. Decryption with `--batch --passphrase` and no loopback was re-tested headless, with no TTY and `pinentry-program /usr/bin/false`, against GnuPG 2.2.19, 2.2.27, 2.4.4 and 2.5.21: it succeeds on all of them. The documented loopback requirement applies to operations that pull secret-key material through `gpg-agent`; this tool only uses symmetric encryption, which takes the passphrase directly. It was not the cause of the hang above and the flag would not have prevented it.
+
 ## v3.2.2
 
 Fixes a data-loss bug in `restore`. Recommended for anyone using `--skip-safety-backup`.

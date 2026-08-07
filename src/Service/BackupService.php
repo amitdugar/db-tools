@@ -157,6 +157,12 @@ final class BackupService implements BackupServiceInterface
         fclose($pipes[1]); // we redirect stdout to file via shell
 
         $closed = false;
+        $stderr = '';
+
+        // Drain stderr inside the poll loop, not after it. The pipe buffer holds
+        // ~64KB; a chatty mysqldump or gpg that fills it blocks on write until
+        // someone reads, and reading only after exit means it never exits.
+        stream_set_blocking($pipes[2], false);
 
         try {
             $running = true;
@@ -165,11 +171,18 @@ final class BackupService implements BackupServiceInterface
                     $tickCallback();
                 }
                 usleep(100_000);
+
+                while (($chunk = fread($pipes[2], 65536)) !== false && $chunk !== '') {
+                    $stderr .= $chunk;
+                }
+
                 $status = proc_get_status($process);
                 $running = $status['running'];
             }
 
-            $stderr = stream_get_contents($pipes[2]) ?: '';
+            while (($chunk = fread($pipes[2], 65536)) !== false && $chunk !== '') {
+                $stderr .= $chunk;
+            }
             fclose($pipes[2]);
 
             // proc_get_status only reports the real code on the first call after
