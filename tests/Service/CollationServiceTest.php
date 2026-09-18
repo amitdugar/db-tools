@@ -7,6 +7,7 @@ namespace DbTools\Tests\Service;
 use DbTools\Service\CollationService;
 use DbTools\Tests\Helper\FakeProcessRunner;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 final class CollationServiceTest extends TestCase
 {
@@ -107,6 +108,67 @@ final class CollationServiceTest extends TestCase
         $this->assertContains('a', $sorted);
         $this->assertContains('b', $sorted);
         $this->assertContains('c', $sorted);
+    }
+
+    /** @return iterable<string, array{bool, ?bool, bool}> */
+    public static function conversionModes(): iterable
+    {
+        foreach ([false, true] as $columnOnly) {
+            foreach (['default' => null, 'disabled' => true, 'enforced' => false] as $mode => $disableChecks) {
+                foreach ([false, true] as $dryRun) {
+                    $name = ($columnOnly ? 'column' : 'table') . '-' . $mode . ($dryRun ? '-dry-run' : '');
+                    yield $name => [$columnOnly, $disableChecks, $dryRun];
+                }
+            }
+        }
+    }
+
+    #[DataProvider('conversionModes')]
+    public function testConversionsRespectForeignKeyCheckMode(bool $columnOnly, ?bool $disableChecks, bool $dryRun): void
+    {
+        $runner = new FakeProcessRunner();
+        $target = 'utf8mb4_0900_ai_ci';
+        $tableCollation = $columnOnly ? $target : 'utf8mb4_general_ci';
+        $runner->scriptedOutput = ["TABLE_NAME\tTABLE_COLLATION\tsize_mb\nshipment\t{$tableCollation}\t1"];
+        if (!$columnOnly && !$dryRun) {
+            $runner->scriptedOutput[] = ''; // Table ALTER output.
+        }
+        $runner->scriptedOutput[] = "COLUMN_NAME\tCOLUMN_TYPE\tIS_NULLABLE\tCOLUMN_DEFAULT\tEXTRA\tCOLLATION_NAME\tCOLUMN_COMMENT"
+            . ($columnOnly ? "\nscheme_type\tvarchar(256)\tYES\tNULL\t\tutf8mb4_general_ci\t" : '');
+        if ($columnOnly && !$dryRun) {
+            $runner->scriptedOutput[] = ''; // Column ALTER output.
+            $runner->scriptedOutput[] = "COLLATION_NAME\n{$target}";
+        }
+        $options = [...self::options(), 'collation' => $target, 'table' => 'shipment', 'dry_run' => $dryRun];
+        if ($disableChecks !== null) {
+            $options['disable_fk_checks'] = $disableChecks;
+        }
+
+        $result = (new CollationService($runner))->convert($options);
+
+        $this->assertSame([], $result['errors']);
+        $this->assertSame($columnOnly && !$dryRun ? 1 : 0, $result['columns_converted']);
+        $this->assertSame(!$columnOnly && !$dryRun ? 1 : 0, $result['tables_converted']);
+        $conversionQueries = [];
+        foreach ($runner->invocations as $invocation) {
+            $query = end($invocation['cmd']);
+            $this->assertIsString($query);
+            if (str_contains($query, 'ALTER TABLE')) {
+                $conversionQueries[] = $query;
+            }
+            if ($dryRun) {
+                $this->assertStringNotContainsString('SET FOREIGN_KEY_CHECKS', $query);
+            }
+        }
+        $this->assertCount($dryRun ? 0 : 1, $conversionQueries);
+        if (!$dryRun) {
+            $alter = $columnOnly
+                ? 'ALTER TABLE `shipment` MODIFY COLUMN `scheme_type` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL'
+                : 'ALTER TABLE `shipment` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci';
+            $expected = $disableChecks === false ? $alter : 'SET FOREIGN_KEY_CHECKS=0; ' . $alter . '; SET FOREIGN_KEY_CHECKS=1;';
+            // One invocation proves the session setting and conversion cannot use separate connections.
+            $this->assertSame($expected, $conversionQueries[0]);
+        }
     }
 
     private static function options(): array

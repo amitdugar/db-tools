@@ -161,23 +161,13 @@ final class CollationService implements CollationServiceInterface
                 if (!$dryRun) {
                     try {
                         $startTime = microtime(true);
-                        // Include FK check disable in same query if flag is set (must be same session)
-                        if ($disableFkChecks) {
-                            $sql = \sprintf(
-                                'SET FOREIGN_KEY_CHECKS=0; ALTER TABLE `%s` CONVERT TO CHARACTER SET %s COLLATE %s; SET FOREIGN_KEY_CHECKS=1;',
-                                $tableName,
-                                $charset,
-                                $targetCollation
-                            );
-                        } else {
-                            $sql = \sprintf(
-                                'ALTER TABLE `%s` CONVERT TO CHARACTER SET %s COLLATE %s',
-                                $tableName,
-                                $charset,
-                                $targetCollation
-                            );
-                        }
-                        $this->runQuery($options, $sql);
+                        $sql = \sprintf(
+                            'ALTER TABLE `%s` CONVERT TO CHARACTER SET %s COLLATE %s',
+                            $tableName,
+                            $charset,
+                            $targetCollation
+                        );
+                        $this->runConversion($options, $sql, $disableFkChecks);
                         $duration = round(microtime(true) - $startTime, 2);
                         $result['tables_converted']++;
 
@@ -234,7 +224,7 @@ final class CollationService implements CollationServiceInterface
                             $startTime = microtime(true);
                             $columnDef = $this->buildColumnDefinition($columnInfo, $targetCollation, $charset);
                             $sql = \sprintf('ALTER TABLE `%s` MODIFY COLUMN %s', $tableName, $columnDef);
-                            $this->runQuery($options, $sql);
+                            $this->runConversion($options, $sql, $disableFkChecks);
                             $duration = round(microtime(true) - $startTime, 2);
 
                             // Verify the conversion was successful
@@ -700,6 +690,18 @@ final class CollationService implements CollationServiceInterface
         }
 
         return $definition;
+    }
+
+    /** @param array<string, mixed> $options */
+    private function runConversion(array $options, string $sql, bool $disableFkChecks): void
+    {
+        // runQuery starts a new client session, so the setting and ALTER must travel together.
+        // A failed ALTER terminates that client, preventing disabled checks from leaking to another query.
+        if ($disableFkChecks) {
+            $sql = 'SET FOREIGN_KEY_CHECKS=0; ' . $sql . '; SET FOREIGN_KEY_CHECKS=1;';
+        }
+
+        $this->runQuery($options, $sql);
     }
 
     /**

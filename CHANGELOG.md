@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.3.1
+
+### Fixed
+
+- Individual column collation conversions now disable foreign-key checks in the same MySQL session as the `ALTER TABLE` statement. This fixes error 3780 when a table already uses the target collation but its foreign-key columns still need conversion.
+- Table and column conversions share the same execution helper and honor `--enforce-fk-checks`.
+
+### Tests
+
+- Add 12 regression cases covering table and column conversions, default and enforced foreign-key checks, and dry runs.
+
 ## v3.3.0
 
 Stops a host option file overriding the credentials you configured. Recommended for anyone whose machines carry a `~/.my.cnf`.
