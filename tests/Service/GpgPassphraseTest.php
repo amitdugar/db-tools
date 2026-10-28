@@ -125,7 +125,8 @@ final class GpgPassphraseTest extends TestCase
         // with gpg in it, as `ps` shows it to every user on the host.
         $dump = $this->tmpDir . '/mysqldump';
         $seen = $this->tmpDir . '/pipeline-args.txt';
-        file_put_contents($dump, "#!/bin/sh\nps -o args= -p \$PPID > " . escapeshellarg($seen)
+        // -ww: without a terminal, Linux ps cuts the line at 80 columns.
+        file_put_contents($dump, "#!/bin/sh\nps -ww -o args= -p \$PPID > " . escapeshellarg($seen)
             . "\necho 'CREATE TABLE t (id INT);'\n");
         chmod($dump, 0755);
         putenv("DBTOOLS_MYSQLDUMP_BIN=$dump");
