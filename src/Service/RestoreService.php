@@ -54,6 +54,12 @@ final class RestoreService implements RestoreServiceInterface
             );
         }
 
+        // The passphrase file too: a temp directory that cannot take it (full in
+        // a disk-full recovery, read-only) must fail the restore before the drop.
+        $passphrase = $ext === 'gpg'
+            ? new GpgPassphrase($password, $this->tempRegistry, $restoreOptions->tempDir)
+            : null;
+
         if (!$restoreOptions->skipSafetyBackup) {
             $this->logger?->info('Creating safety backup');
             $this->backupService->backup([
@@ -79,11 +85,11 @@ final class RestoreService implements RestoreServiceInterface
         $canStream = $this->canStream($archive, $ext, $password);
 
         if ($canStream) {
-            $this->restoreStreaming($archive, $ext, $password, $db, $tickCallback);
+            $this->restoreStreaming($archive, $ext, $passphrase, $db, $tickCallback);
             $sqlSize = 0; // Unknown when streaming — not materialized
         } else {
             // Fallback: extract to temp, import, clean up
-            $sqlPath = $this->extractArchive($restoreOptions, $tickCallback);
+            $sqlPath = $this->extractArchive($restoreOptions, $tickCallback, $passphrase);
             $sqlSize = is_file($sqlPath) ? (int) filesize($sqlPath) : 0;
             try {
                 $this->importSql($db, $sqlPath, $tickCallback);
@@ -121,7 +127,7 @@ final class RestoreService implements RestoreServiceInterface
     private function restoreStreaming(
         string $archive,
         string $ext,
-        ?string $password,
+        ?GpgPassphrase $passphrase,
         DatabaseConfig $db,
         ?callable $tickCallback,
     ): void {
@@ -132,13 +138,13 @@ final class RestoreService implements RestoreServiceInterface
             // so this cannot fire — but a null here would reach proc_open as a
             // command argument, which is worth failing loudly rather than
             // relying on a caller-side invariant.
-            if ($password === null) {
+            if ($passphrase === null) {
                 throw new RuntimeException('Archive is encrypted; provide --encryption-password');
             }
 
             $pipeline[] = [
                 'gpg', '--batch', '--yes',
-                '--passphrase', $password,
+                ...$passphrase->args(),
                 '--decrypt', $archive,
             ];
             // Determine inner extension
@@ -185,8 +191,11 @@ final class RestoreService implements RestoreServiceInterface
         return $cmd;
     }
 
-    private function extractArchive(RestoreOptions $options, ?callable $tickCallback = null): string
-    {
+    private function extractArchive(
+        RestoreOptions $options,
+        ?callable $tickCallback = null,
+        ?GpgPassphrase $passphrase = null,
+    ): string {
         $archive = realpath($options->archive) ?: $options->archive;
         if (!is_file($archive)) {
             throw new RuntimeException("Archive not found: {$archive}");
@@ -204,7 +213,8 @@ final class RestoreService implements RestoreServiceInterface
             if ($password === null) {
                 throw new RuntimeException('Archive is encrypted; provide --encryption-password or ensure filename contains random string');
             }
-            $archive = $this->decryptFile($archive, $password, $tempDir, $tickCallback);
+            $passphrase ??= new GpgPassphrase($password, $this->tempRegistry, $options->tempDir);
+            $archive = $this->decryptFile($archive, $passphrase, $tempDir, $tickCallback);
             $ext = strtolower(pathinfo($archive, PATHINFO_EXTENSION));
         }
 
@@ -246,13 +256,17 @@ final class RestoreService implements RestoreServiceInterface
         return null;
     }
 
-    private function decryptFile(string $encryptedPath, string $password, string $tempDir, ?callable $tickCallback = null): string
-    {
+    private function decryptFile(
+        string $encryptedPath,
+        GpgPassphrase $passphrase,
+        string $tempDir,
+        ?callable $tickCallback = null,
+    ): string {
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($encryptedPath, '.gpg');
 
         $cmd = [
             'gpg', '--batch', '--yes',
-            '--passphrase', $password,
+            ...$passphrase->args(),
             '--decrypt',
             '--output', $decryptedPath,
             $encryptedPath,
@@ -267,14 +281,15 @@ final class RestoreService implements RestoreServiceInterface
     {
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($encryptedPath, '.enc');
 
+        // From the environment, not "pass:" on the command line, where `ps` shows it.
         $cmd = [
             'openssl', 'enc', '-aes-256-cbc', '-d', '-pbkdf2',
             '-in', $encryptedPath,
             '-out', $decryptedPath,
-            '-pass', 'pass:' . $password,
+            '-pass', 'env:DBTOOLS_LEGACY_PASSPHRASE',
         ];
 
-        $this->runner->run($cmd, [], $tickCallback);
+        $this->runner->run($cmd, ['DBTOOLS_LEGACY_PASSPHRASE' => $password], $tickCallback);
 
         return $decryptedPath;
     }

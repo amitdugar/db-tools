@@ -84,9 +84,10 @@ final class ImportService implements ImportServiceInterface
     {
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($file, '.gpg');
 
+        $passphrase = new GpgPassphrase($password, $this->tempRegistry);
         $cmd = [
             'gpg', '--batch', '--yes', '--quiet',
-            '--passphrase', $password,
+            ...$passphrase->args(),
             '--decrypt',
             '--output', $decryptedPath,
             $file,
@@ -135,9 +136,10 @@ final class ImportService implements ImportServiceInterface
                 throw new RuntimeException('File is encrypted; provide --encryption-password');
             }
 
+            $passphrase = new GpgPassphrase($encryptionPassword, $this->tempRegistry);
             $pipeline[] = [
                 'gpg', '--batch', '--yes',
-                '--passphrase', $encryptionPassword,
+                ...$passphrase->args(),
                 '--decrypt', $file,
             ];
             $innerExt = strtolower(pathinfo(pathinfo($file, PATHINFO_FILENAME), PATHINFO_EXTENSION));
@@ -234,9 +236,10 @@ final class ImportService implements ImportServiceInterface
     {
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($encryptedPath, '.gpg');
 
+        $passphrase = new GpgPassphrase($password, $this->tempRegistry);
         $cmd = [
             'gpg', '--batch', '--yes',
-            '--passphrase', $password,
+            ...$passphrase->args(),
             '--decrypt',
             '--output', $decryptedPath,
             $encryptedPath,

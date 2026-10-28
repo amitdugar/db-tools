@@ -99,9 +99,10 @@ final class VerifyService implements VerifyServiceInterface
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($target, '.gpg');
 
         try {
+            $passphrase = new GpgPassphrase($password, $this->tempRegistry);
             $cmd = [
                 'gpg', '--batch', '--yes',
-                '--passphrase', $password,
+                ...$passphrase->args(),
                 '--decrypt',
                 '--output', $decryptedPath,
                 $target,
@@ -125,13 +126,14 @@ final class VerifyService implements VerifyServiceInterface
         $decryptedPath = $tempDir . DIRECTORY_SEPARATOR . basename($target, '.enc');
 
         try {
+            // From the environment, not "pass:" on the command line, where `ps` shows it.
             $cmd = [
                 'openssl', 'enc', '-aes-256-cbc', '-d', '-pbkdf2',
                 '-in', $target,
                 '-out', $decryptedPath,
-                '-pass', 'pass:' . $password,
+                '-pass', 'env:DBTOOLS_LEGACY_PASSPHRASE',
             ];
-            $this->runner->run($cmd);
+            $this->runner->run($cmd, ['DBTOOLS_LEGACY_PASSPHRASE' => $password]);
 
             $ok = ArchiveUtility::validateArchive($decryptedPath);
             if (!$ok) {

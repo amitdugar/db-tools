@@ -202,4 +202,33 @@ final class RestoreSafetyTest extends TestCase
         $sql = implode(' | ', $this->sqlStatements($runner));
         $this->assertStringNotContainsString('DROP DATABASE', $sql, 'Database was dropped before the passphrase was validated');
     }
+    /**
+     * The gpg passphrase file is written to the temp directory. One that cannot
+     * take it (full during a disk-full recovery, read-only) must fail the restore
+     * before the drop: with --skip-safety-backup nothing else is left.
+     */
+    public function testAPassphraseFileThatCannotBeWrittenFailsBeforeTouchingTheDatabase(): void
+    {
+        $runner = new FakeProcessRunner();
+        $archive = $this->tmpDir . '/fixed-20260101-000000.sql.zst.gpg';
+        file_put_contents($archive, 'not really encrypted');
+
+        try {
+            (new RestoreService($runner, new SpyBackupService()))->restore([
+                'database' => 'testdb',
+                'archive' => $archive,
+                'host' => 'localhost',
+                'user' => 'root',
+                'encryption_password' => 'FIXEDKEY123',
+                'temp_dir' => $this->tmpDir . '/no-such-dir',
+                'skip_safety_backup' => true,
+            ]);
+            $this->fail('Expected a temp directory that cannot take the passphrase to fail');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('passphrase', $e->getMessage());
+        }
+
+        $sql = implode(' | ', $this->sqlStatements($runner));
+        $this->assertStringNotContainsString('DROP DATABASE', $sql, 'Database was dropped before the passphrase file was written');
+    }
 }

@@ -107,9 +107,10 @@ final class BackupService implements BackupServiceInterface
 
         if ($encryptionPassword !== null) {
             $gpgDestWithExt = $destWithExt . '.gpg';
+            $passphrase = new GpgPassphrase($encryptionPassword, $this->tempRegistry);
             $pipeline[] = [
                 'gpg', '--batch', '--yes',
-                '--passphrase', $encryptionPassword,
+                ...$passphrase->args(),
                 '--symmetric', '--cipher-algo', 'AES256',
             ];
             // Build shell pipeline that redirects last stage to file
@@ -358,9 +359,10 @@ final class BackupService implements BackupServiceInterface
     {
         $encryptedPath = $path . '.gpg';
 
+        $passphrase = new GpgPassphrase($password, $this->tempRegistry);
         $cmd = [
             'gpg', '--batch', '--yes',
-            '--passphrase', $password,
+            ...$passphrase->args(),
             '--symmetric', '--cipher-algo', 'AES256',
             '--output', $encryptedPath,
             $path,

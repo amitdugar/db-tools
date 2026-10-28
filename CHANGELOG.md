@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.3.2
+
+Keeps the encryption passphrase out of the process list. Recommended for every host that runs encrypted backups.
+
+### Fixed
+
+- **The gpg passphrase was readable by any user on the host for the whole backup.** gpg received it as `--passphrase <secret>`, and a streamed backup ran gpg inside a `sh -c` pipeline that carried it too, so `ps` showed it for as long as the dump ran. Restore, import and verify passed it the same way. gpg now reads it from a file: created `0600` in the temp directory, registered for cleanup, and deleted as soon as gpg has finished. The process list shows only the file's path.
+- The legacy `openssl` decryption in restore and verify read its password from `-pass pass:<secret>`. It now reads it from the environment (`-pass env:DBTOOLS_LEGACY_PASSPHRASE`), which `ps` does not show.
+
+The passphrase file goes in the temp directory. With `--temp-dir` it goes there or the run fails, never silently anywhere else. Without it, the file goes in the first writable of `TMPDIR`, the system temp directory and `/tmp`, so a stale `TMPDIR` inherited by cron does not stop a backup. A restore creates it before it drops the target database, so a temp directory that cannot take it fails the restore while the database is still there. A process killed outright (SIGKILL) leaves the file behind, readable only by its owner and root.
+
+Archives are unchanged. A backup made this way opens with the same passphrase given on the command line, and older backups open as before. gpg reads only the first line of a passphrase file, so a passphrase with a line break is still passed as an argument, as before.
+
+### Tests
+
+- The passphrase file is private, registered, and gone afterwards. A streamed backup through real gzip and gpg opens with the passphrase, and the pipeline's command line, as `ps` shows it, does not carry it. Backup, restore, import and verify run no gpg or openssl command that carries it.
+- A restore whose temp directory cannot take the passphrase file fails before `DROP DATABASE`.
+
 ## v3.3.1
 
 ### Fixed
