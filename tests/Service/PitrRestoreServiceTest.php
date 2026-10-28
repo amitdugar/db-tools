@@ -39,7 +39,7 @@ final class PitrRestoreServiceTest extends TestCase
     {
         $found = [];
         foreach ($runner->invocations as $invocation) {
-            $cmd = array_values(array_map('strval', $invocation['cmd']));
+            $cmd = $invocation['cmd'];
             $tool = basename($cmd[0] ?? '');
             if ($tool === 'mysqlbinlog' || $tool === 'mariadb-binlog') {
                 $found[] = $cmd;

@@ -205,12 +205,6 @@ parameters:
 			path: tests/Helper/FakeProcessRunner.php
 
 		-
-			message: '#^Property DbTools\\Tests\\Helper\\FakeProcessRunner\:\:\$invocations type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 2
-			path: tests/Helper/FakeProcessRunner.php
-
-		-
 			message: '#^Method DbTools\\Tests\\Service\\CollationServiceTest\:\:options\(\) return type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
 			count: 1

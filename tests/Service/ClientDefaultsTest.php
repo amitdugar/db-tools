@@ -150,7 +150,7 @@ final class ClientDefaultsTest extends TestCase
 
         foreach ($runner->invocations as $invocation) {
             if (in_array(basename((string) $invocation['cmd'][0]), ['mysqldump', 'mariadb-dump'], true)) {
-                return array_values($invocation['cmd']);
+                return $invocation['cmd'];
             }
         }
 

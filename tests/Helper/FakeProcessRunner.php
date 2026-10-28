@@ -10,7 +10,7 @@ use Symfony\Component\Process\Process;
 
 final class FakeProcessRunner implements ProcessRunnerInterface
 {
-    /** @var array<int,array{cmd:array,env:array}> */
+    /** @var list<array{cmd: list<string>, env: array<string, string>}> */
     public array $invocations = [];
 
     public ?string $lastImport = null;
