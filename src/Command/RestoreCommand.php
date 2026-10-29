@@ -112,10 +112,7 @@ final class RestoreCommand extends Command
             $this->clearSpinner($output);
             $elapsed = microtime(true) - $start;
 
-            // Show size info - if archive and SQL are same size, it's uncompressed
-            $sizeInfo = $result['archive_size'] === $result['sql_size']
-                ? sprintf('%s', $this->formatSize($result['sql_size']))
-                : sprintf('%s compressed → %s raw', $this->formatSize($result['archive_size']), $this->formatSize($result['sql_size']));
+            $sizeInfo = $this->sizeInfo($result['archive_size'], $result['sql_size']);
 
             $output->writeln(sprintf(
                 '<info>✓</info> Restore completed to <info>%s</info> in %s <fg=gray>(%s)</>',
@@ -402,5 +399,20 @@ final class RestoreCommand extends Command
         }
 
         return $fallback ?? 'localhost';
+    }
+
+    /**
+     * The size shown after "Restore completed". A streamed restore never writes
+     * the SQL out, so its size is unknown (0) and only the archive's is shown:
+     * "0 B raw" read as a restore that restored nothing. The same two sizes
+     * mean the archive was not compressed.
+     */
+    private function sizeInfo(int $archiveSize, int $sqlSize): string
+    {
+        if ($sqlSize === 0 || $sqlSize === $archiveSize) {
+            return $this->formatSize($archiveSize);
+        }
+
+        return sprintf('%s compressed → %s raw', $this->formatSize($archiveSize), $this->formatSize($sqlSize));
     }
 }

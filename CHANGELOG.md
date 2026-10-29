@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.3.4
+
+### Fixed
+
+- **A restore that worked said it restored nothing.** A streamed restore never writes the SQL out, so its size is unknown, and the last line read `Restore completed to vlsm in 3.5s (53.7 KB compressed → 0 B raw)`. It now shows the archive size alone: `(53.7 KB)`. A restore that extracts the SQL first still shows both sizes.
+
+### Tests
+
+- The size shown after a restore: the archive size alone for a streamed restore and for an uncompressed archive, both sizes for an extracted one.
+
 ## v3.3.3
 
 Fixes encrypted backups, restores, imports and verifies run as an account whose home directory it cannot write to. Recommended for every InteLIS host: there, that account is the web server's.
