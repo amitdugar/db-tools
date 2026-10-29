@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.3.5
+
+### Fixed
+
+- **Choosing a backup in the restore list did nothing when run as `www-data`.** The list is fzf, which records the chosen backup with an action it runs through `$SHELL`. Run as `www-data` (`sudo -u www-data php vendor/bin/db-tools restore`), `$SHELL` is `/usr/sbin/nologin`, so the action never ran, and every restore ended with `Restore cancelled.` fzf now runs with `SHELL=/bin/sh` whatever the account's login shell is.
+
+### Tests
+
+- The fzf command sets `SHELL=/bin/sh` and still writes the chosen path to the output file.
+
 ## v3.3.4
 
 ### Fixed

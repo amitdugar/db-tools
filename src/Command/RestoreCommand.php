@@ -238,16 +238,7 @@ final class RestoreCommand extends Command
 
         file_put_contents($inputFile, implode("\n", $lines));
 
-        // Build fzf command that writes selection to output file
-        $cmd = sprintf(
-            'OUT=%s; export OUT; cat %s | fzf --ansi --height=80%% --reverse --border ' .
-            '--prompt=%s --header=%s --delimiter="\t" --with-nth=2.. ' .
-            '--bind "enter:execute-silent(echo {1} > \"$OUT\")+abort"',
-            escapeshellarg($outputFile),
-            escapeshellarg($inputFile),
-            escapeshellarg('Select> '),
-            escapeshellarg('Select backup to restore (Esc to cancel):')
-        );
+        $cmd = $this->fzfCommand($outputFile, $inputFile);
 
         $process = Process::fromShellCommandline($cmd);
         $process->setTimeout(null);
@@ -414,5 +405,26 @@ final class RestoreCommand extends Command
         }
 
         return sprintf('%s compressed → %s raw', $this->formatSize($archiveSize), $this->formatSize($sqlSize));
+    }
+
+    /**
+     * The fzf command that writes the chosen backup's path to $outputFile.
+     *
+     * fzf runs the execute-silent action through $SHELL. Run as www-data, as
+     * InteLIS runs it, $SHELL is /usr/sbin/nologin: the action did nothing, no
+     * backup was chosen, and the restore ended with "Restore cancelled." fzf
+     * gets /bin/sh whatever the account's login shell is.
+     */
+    private function fzfCommand(string $outputFile, string $inputFile): string
+    {
+        return sprintf(
+            'OUT=%s; export OUT; cat %s | SHELL=/bin/sh fzf --ansi --height=80%% --reverse --border ' .
+            '--prompt=%s --header=%s --delimiter="\t" --with-nth=2.. ' .
+            '--bind "enter:execute-silent(echo {1} > \"$OUT\")+abort"',
+            escapeshellarg($outputFile),
+            escapeshellarg($inputFile),
+            escapeshellarg('Select> '),
+            escapeshellarg('Select backup to restore (Esc to cancel):')
+        );
     }
 }
