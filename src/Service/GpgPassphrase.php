@@ -28,10 +28,19 @@ use RuntimeException;
  * gpg reads the first line of the file only. A passphrase with a line break
  * is still passed with --passphrase, as before: in a file it would be cut at
  * the break and no longer open the archives made with it.
+ *
+ * gpg also needs a home directory it can write to, even for a passphrase. The
+ * web server's account (www-data) has /var/www as its home, and root owns
+ * /var/www, so gpg could not create ~/.gnupg there and every encrypted backup
+ * run as www-data failed. When the account's own home cannot be used, gpg gets
+ * a private one in the temp directory (see homeArgs).
  */
 final class GpgPassphrase
 {
     private ?string $path = null;
+
+    /** @var list<string> */
+    private array $homeArgs;
 
     public function __construct(
         #[\SensitiveParameter]
@@ -39,6 +48,7 @@ final class GpgPassphrase
         private readonly ?TempFileRegistry $registry = null,
         ?string $tempDir = null,
     ) {
+        $this->homeArgs = self::homeArgs($tempDir);
         if (preg_match('/[\r\n]/', $passphrase) === 1) {
             return;
         }
@@ -85,15 +95,62 @@ final class GpgPassphrase
     }
 
     /**
-     * The gpg arguments that carry the passphrase.
+     * The home directory gpg uses, when its own cannot be used.
+     *
+     * Nothing is added when GNUPGHOME is set, or when ~/.gnupg exists and is
+     * writable, or can be created. Otherwise gpg gets dbtools-gnupg-<uid> in
+     * the temp directory, made 0700. It is the same directory on every run, so
+     * gpg starts one gpg-agent for it, not one per backup.
+     *
+     * The temp directory is shared with every user on the host. A directory of
+     * that name that is a link, or belongs to another user, is refused rather
+     * than used: whoever made it could read what gpg keeps there.
+     *
+     * @return list<string>
+     */
+    private static function homeArgs(?string $tempDir): array
+    {
+        $gnupgHome = getenv('GNUPGHOME');
+        if ($gnupgHome !== false && $gnupgHome !== '') {
+            return [];
+        }
+        $home = getenv('HOME');
+        if ($home === false || $home === '') {
+            $home = (posix_getpwuid(posix_geteuid()) ?: ['dir' => ''])['dir'];
+        }
+        $own = rtrim($home, '/') . '/.gnupg';
+        if (is_dir($own) ? is_writable($own) : ($home !== '' && is_dir($home) && is_writable($home))) {
+            return [];
+        }
+
+        $dir = self::directory($tempDir) . '/dbtools-gnupg-' . posix_geteuid();
+        if (!is_link($dir) && !is_dir($dir)) {
+            @mkdir($dir, 0700);
+        }
+        if (is_link($dir) || !is_dir($dir) || fileowner($dir) !== posix_geteuid()) {
+            throw new RuntimeException(
+                "gpg cannot create {$own}, and {$dir} is not a directory this account owns. Remove {$dir}."
+            );
+        }
+        chmod($dir, 0700);
+
+        return ['--homedir', $dir];
+    }
+
+    /**
+     * The gpg arguments that carry the passphrase, after the home directory
+     * gpg should use when its own cannot be used.
      *
      * @return list<string>
      */
     public function args(): array
     {
-        return $this->path === null
-            ? ['--passphrase', $this->passphrase]
-            : ['--passphrase-file', $this->path];
+        return [
+            ...$this->homeArgs,
+            ...($this->path === null
+                ? ['--passphrase', $this->passphrase]
+                : ['--passphrase-file', $this->path]),
+        ];
     }
 
     public function __destruct()

@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.3.3
+
+Fixes encrypted backups, restores, imports and verifies run as an account whose home directory it cannot write to. Recommended for every InteLIS host: there, that account is the web server's.
+
+### Fixed
+
+- **Encryption failed for an account that cannot write to its home directory.** gpg keeps a home directory (`~/.gnupg`) even when it only uses a passphrase. The web server's account, `www-data`, has `/var/www` as its home, and root owns `/var/www`. A backup run as `www-data` stopped with `gpg: Fatal: can't create directory '/var/www/.gnupg': Permission denied`, and nothing was written.
+
+  When `~/.gnupg` can be neither used nor created, gpg now gets a private home: `dbtools-gnupg-<uid>` in the temp directory, made `0700`. It is the same directory on every run, so gpg starts one `gpg-agent` for it, not one per backup. A directory of that name that is a link, or belongs to another user, is refused with an error naming it: whoever made it could read what gpg keeps there. `GNUPGHOME`, when set, is used as before.
+
+Archives are unchanged. The fix applies to backup, restore, import and verify alike, since they all pass gpg its options the same way.
+
+### Tests
+
+- Encrypting and decrypting with real gpg work for an account whose home directory is read-only. Before the fix, encrypting failed with the same error as `www-data`.
+- The private home is made `0700` only when needed. A usable `~/.gnupg` or a set `GNUPGHOME` is kept. A planted link in its place is refused.
+
 ## v3.3.2
 
 Keeps the encryption passphrase out of the process list. Recommended for every host that runs encrypted backups.

@@ -24,20 +24,31 @@ use Symfony\Component\Process\Process;
 final class GpgPassphraseTest extends TestCase
 {
     private string $tmpDir;
+    private string|false $home;
+    private string|false $gnupgHome;
 
     protected function setUp(): void
     {
-        $this->tmpDir = sys_get_temp_dir() . '/dbtools-pass-test-' . bin2hex(random_bytes(4));
+        $this->home = getenv('HOME');
+        $this->gnupgHome = getenv('GNUPGHOME');
+        // /tmp, not the macOS per-user temp directory: gpg-agent puts its socket
+        // in the gpg home, and a socket path is limited to about 100 bytes.
+        $base = is_dir('/tmp') && is_writable('/tmp') ? '/tmp' : sys_get_temp_dir();
+        $this->tmpDir = $base . '/dbtools-pass-test-' . bin2hex(random_bytes(4));
         @mkdir($this->tmpDir, 0777, true);
         ArchiveUtility::setMaxFileSize(null);
     }
 
     protected function tearDown(): void
     {
-        foreach (glob($this->tmpDir . '/*') ?: [] as $file) {
-            @unlink($file);
+        putenv('HOME' . ($this->home === false ? '' : '=' . $this->home));
+        putenv('GNUPGHOME' . ($this->gnupgHome === false ? '' : '=' . $this->gnupgHome));
+        // A gpg home made by a test has its own gpg-agent. Stop it with the home.
+        foreach (glob($this->tmpDir . '/dbtools-gnupg-*') ?: [] as $home) {
+            (new Process(['gpgconf', '--homedir', $home, '--kill', 'gpg-agent']))->run();
         }
-        @rmdir($this->tmpDir);
+        @chmod($this->tmpDir . '/locked', 0755);
+        (new Process(['rm', '-rf', $this->tmpDir]))->run();
     }
 
     public function testThePassphraseIsInAPrivateFileUntilTheObjectGoes(): void
@@ -89,6 +100,85 @@ final class GpgPassphraseTest extends TestCase
         $passphrase = new GpgPassphrase("two\nlines");
 
         $this->assertSame(['--passphrase', "two\nlines"], $passphrase->args());
+    }
+
+    /**
+     * The web server's account (www-data) has /var/www as its home, and root owns
+     * /var/www. gpg could not create its ~/.gnupg there, so every encrypted
+     * backup run as www-data failed: "can't create directory '/var/www/.gnupg'".
+     */
+    public function testGpgGetsAPrivateHomeWhenItsOwnCannotBeCreated(): void
+    {
+        $this->lockHome();
+
+        $args = (new GpgPassphrase('FIXEDKEY123', null, $this->tmpDir))->args();
+
+        $this->assertSame('--homedir', $args[0]);
+        $this->assertSame($this->tmpDir . '/dbtools-gnupg-' . posix_geteuid(), $args[1]);
+        $this->assertSame(0700, fileperms($args[1]) & 0777, 'gpg refuses a home other users can read');
+    }
+
+    public function testGpgKeepsItsOwnHomeWhenItCanUseIt(): void
+    {
+        putenv('GNUPGHOME');
+        putenv('HOME=' . $this->tmpDir);
+
+        $this->assertNotContains('--homedir', (new GpgPassphrase('FIXEDKEY123'))->args());
+    }
+
+    public function testAGnupghomeTheOperatorSetIsKept(): void
+    {
+        $this->lockHome();
+        putenv('GNUPGHOME=' . $this->tmpDir . '/chosen');
+
+        $this->assertNotContains('--homedir', (new GpgPassphrase('FIXEDKEY123', null, $this->tmpDir))->args());
+    }
+
+    public function testAPrivateHomeSomeoneElsePlantedIsRefused(): void
+    {
+        $this->lockHome();
+        symlink($this->tmpDir . '/locked', $this->tmpDir . '/dbtools-gnupg-' . posix_geteuid());
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('dbtools-gnupg-');
+
+        new GpgPassphrase('FIXEDKEY123', null, $this->tmpDir);
+    }
+
+    public function testAnArchiveIsEncryptedAndOpenedWhenTheHomeIsReadOnly(): void
+    {
+        if ((new ExecutableFinder())->find('gpg') === null) {
+            $this->markTestSkipped('gpg is not installed');
+        }
+        $this->lockHome();
+        $plain = $this->tmpDir . '/plain.sql';
+        file_put_contents($plain, "CREATE TABLE t (id INT);\n");
+        $passphrase = new GpgPassphrase('FIXEDKEY123', null, $this->tmpDir);
+
+        $env = ['HOME' => $this->tmpDir . '/locked', 'GNUPGHOME' => false];
+        $encrypt = new Process([
+            'gpg', '--batch', '--yes', ...$passphrase->args(),
+            '--symmetric', '--cipher-algo', 'AES256', '--output', $plain . '.gpg', $plain,
+        ], null, $env);
+        $encrypt->run();
+        $this->assertTrue($encrypt->isSuccessful(), $encrypt->getErrorOutput());
+
+        $decrypt = new Process([
+            'gpg', '--batch', '--yes', '--quiet', ...$passphrase->args(), '--decrypt', $plain . '.gpg',
+        ], null, $env);
+        $decrypt->run();
+        $this->assertSame("CREATE TABLE t (id INT);\n", $decrypt->getOutput(), $decrypt->getErrorOutput());
+    }
+
+    /** A home directory gpg cannot create ~/.gnupg in, as /var/www is for www-data. */
+    private function lockHome(): void
+    {
+        if (posix_geteuid() === 0) {
+            $this->markTestSkipped('root can write to any home directory');
+        }
+        mkdir($this->tmpDir . '/locked', 0555);
+        putenv('GNUPGHOME');
+        putenv('HOME=' . $this->tmpDir . '/locked');
     }
 
     public function testAnArchiveMadeThroughTheFileOpensWithThePassphraseAsBefore(): void
