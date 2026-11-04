@@ -327,7 +327,10 @@ final class BackupService implements BackupServiceInterface
     private function buildCompressCommand(string $backend): array
     {
         return match ($backend) {
-            ArchiveUtility::BACKEND_ZSTD => ['zstd', '-T0', '-q', '-19'],
+            // Level 6, as gzip and pigz use by default. Level 19 made files
+            // somewhat smaller but took over 20 minutes for a 1.4 GB dump on
+            // a 2-core server, keeping both cores busy.
+            ArchiveUtility::BACKEND_ZSTD => ['zstd', '-T0', '-q', '-6'],
             ArchiveUtility::BACKEND_PIGZ => ['pigz', '-c'],
             ArchiveUtility::BACKEND_GZIP => ['gzip', '-c'],
             default => throw new RuntimeException("Unsupported streaming backend: {$backend}"),

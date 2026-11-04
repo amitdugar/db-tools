@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.3.7
+
+### Fixed
+
+- **zstd backups kept a small server busy for over 20 minutes.** zstd ran at level 19. For a 1.4 GB dump on a 2-core server it used both cores for more than 20 minutes. It now runs at level 6, as gzip and pigz do by default. On 236 MB of SQL, level 6 took 2.5 seconds and level 19 took 229 seconds. The level 6 file was 44 MB against 32 MB.
+
 ## v3.3.6
 
 ### Fixed
