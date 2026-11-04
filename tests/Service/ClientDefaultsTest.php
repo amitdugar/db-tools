@@ -122,6 +122,15 @@ final class ClientDefaultsTest extends TestCase
     }
 
     /**
+     * A user granted only its own database has no PROCESS privilege, and
+     * mysqldump fails for it unless it skips the tablespace details.
+     */
+    public function testTheDumpCommandSkipsTablespaces(): void
+    {
+        self::assertContains('--no-tablespaces', $this->dumpCommand(['password' => 'dbsecret']));
+    }
+
+    /**
      * @param  array<string,mixed> $extra
      * @return list<string>
      */

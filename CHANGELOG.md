@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.3.6
+
+### Fixed
+
+- **Backups by a user granted only its own database logged a PROCESS error.** mysqldump reads tablespace details by default, which needs the global PROCESS privilege. For a user with `GRANT ALL ON db.*` it printed `Access denied; you need (at least one of) the PROCESS privilege(s)` on every run. Backups and exports now pass `--no-tablespaces`. A dump of one database needs no tablespace details.
+
+### Tests
+
+- The dump command includes `--no-tablespaces`.
+
 ## v3.3.5
 
 ### Fixed

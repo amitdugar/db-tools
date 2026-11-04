@@ -49,6 +49,10 @@ final class ExportService implements ExportServiceInterface
             '--host=' . $db->host,
             '--user=' . ($db->user ?? ''),
             '--single-transaction',
+            // Tablespace details need the global PROCESS privilege, which a
+            // user granted only its own database lacks. Without this flag
+            // mysqldump fails for that user, and the dump needs none of them.
+            '--no-tablespaces',
             '--skip-lock-tables',
             '--skip-add-locks',
             '--routines',
